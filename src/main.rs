@@ -47,12 +47,44 @@ enum Command {
 
 #[derive(Debug, Serialize, PartialEq)]
 struct Normativa {
-    provincia: String,
+    provincia: Option<String>,
+    jurisdiccion: Jurisdiccion,
     tipo_norma: String,
     titulo: String,
+    // Last path segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
+    ley: String,
     url: String,
     fecha_publicacion: Option<String>,
     descripcion: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[serde(rename_all = "lowercase")]
+enum Jurisdiccion {
+    Provincial,
+    Nacional,
+}
+
+impl Jurisdiccion {
+    fn from_path_segment(segment: &str) -> Option<Self> {
+        match segment {
+            "provincial" => Some(Self::Provincial),
+            "nacional" => Some(Self::Nacional),
+            _ => None,
+        }
+    }
+}
+
+/// Splits a law link `/normativa/<jurisdiccion>/<ley>` into its jurisdiction and law slug.
+fn parse_law_href(href: &str) -> Option<(Jurisdiccion, &str)> {
+    let (segment, ley) = href
+        .strip_prefix(SEARCH_PATH)?
+        .strip_prefix('/')?
+        .split_once('/')?;
+    if ley.is_empty() || ley.contains('/') {
+        return None;
+    }
+    Some((Jurisdiccion::from_path_segment(segment)?, ley))
 }
 
 #[derive(Debug, PartialEq)]
@@ -80,7 +112,7 @@ fn parse_options(html: &str, select_name: &str) -> Result<Vec<String>> {
         .collect())
 }
 
-fn parse_results(html: &str, provincia: &str) -> Result<ResultsPage> {
+fn parse_results(html: &str, provincia: Option<&str>) -> Result<ResultsPage> {
     let document = Html::parse_document(html);
     let row_selector = selector("#normas tbody tr")?;
     let link_selector = selector(r#"td[data-label="Normativa"] a"#)?;
@@ -104,10 +136,16 @@ fn parse_results(html: &str, provincia: &str) -> Result<ResultsPage> {
         .filter_map(|row| {
             let link = row.select(&link_selector).next()?;
             let href = link.value().attr("href")?;
+            let Some((jurisdiccion, ley)) = parse_law_href(href) else {
+                tracing::warn!(href, "unrecognised normativa link");
+                return None;
+            };
             Some(Normativa {
-                provincia: provincia.to_owned(),
+                provincia: provincia.map(str::to_owned),
+                jurisdiccion,
                 tipo_norma: TIPO_NORMA.to_owned(),
                 titulo: collapse_whitespace(&link.text().collect::<String>()),
+                ley: ley.to_owned(),
                 url: format!("{SITE_ORIGIN}{href}"),
                 fecha_publicacion: row
                     .select(&time_selector)
@@ -193,7 +231,7 @@ async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
             tokio::time::sleep(CRAWL_DELAY).await;
         }
         let html = fetch_html(page, &search_url(provincia, query, page_number)?).await?;
-        let results = parse_results(&html, provincia)?;
+        let results = parse_results(&html, Some(provincia))?;
         if page_number == 1 {
             total_pages = results.total_pages;
         }
@@ -253,17 +291,19 @@ mod tests {
     #[test]
     fn parse_results_buenos_aires_laws_page_returns_fifty_rows_over_three_pages() -> Result<()> {
         // Arrange / Act
-        let results = parse_results(RESULTS_FIXTURE, "Buenos Aires")?;
+        let results = parse_results(RESULTS_FIXTURE, Some("Buenos Aires"))?;
 
         // Assert
         assert_eq!(results.total_pages, 3);
         assert_eq!(results.rows.len(), 50);
         let first = &results.rows[0];
+        assert_eq!(first.provincia.as_deref(), Some("Buenos Aires"));
+        assert_eq!(first.jurisdiccion, Jurisdiccion::Provincial);
         assert_eq!(first.tipo_norma, "Ley");
-        assert!(
-            first
-                .url
-                .starts_with("https://www.argentina.gob.ar/normativa/provincial/")
+        assert!(first.ley.starts_with("ley-"));
+        assert_eq!(
+            first.url,
+            format!("{SITE_ORIGIN}/normativa/provincial/{}", first.ley)
         );
         assert!(!first.titulo.is_empty());
         assert!(first.fecha_publicacion.is_some());
@@ -276,7 +316,7 @@ mod tests {
         let html = "<html><body><p>No se encontraron normas</p></body></html>";
 
         // Act
-        let results = parse_results(html, "Chaco")?;
+        let results = parse_results(html, Some("Chaco"))?;
 
         // Assert
         assert_eq!(
@@ -287,6 +327,63 @@ mod tests {
             }
         );
         Ok(())
+    }
+
+    #[test]
+    fn parse_results_without_province_serialises_null_province() -> Result<()> {
+        // Arrange
+        let html = r#"<div id="normas"><table><tbody><tr>
+            <td data-label="Normativa"><a href="/normativa/nacional/ley-1-abc"> Ley 1 </a></td>
+            </tr></tbody></table></div>"#;
+
+        // Act
+        let results = parse_results(html, None)?;
+        let json = serde_json::to_string(&results.rows[0])?;
+
+        // Assert
+        assert!(json.contains(r#""provincia":null"#));
+        assert!(json.contains(r#""jurisdiccion":"nacional""#));
+        assert!(json.contains(r#""ley":"ley-1-abc""#));
+        Ok(())
+    }
+
+    #[test]
+    fn parse_law_href_provincial_link_returns_jurisdiction_and_slug() {
+        // Act
+        let parsed =
+            parse_law_href("/normativa/provincial/ley-11035-123456789-0abc-defg-373-0000svorpyel");
+
+        // Assert
+        assert_eq!(
+            parsed,
+            Some((
+                Jurisdiccion::Provincial,
+                "ley-11035-123456789-0abc-defg-373-0000svorpyel"
+            ))
+        );
+    }
+
+    #[test]
+    fn parse_law_href_nacional_link_returns_nacional() {
+        // Act
+        let parsed = parse_law_href("/normativa/nacional/ley-27078-abc");
+
+        // Assert
+        assert_eq!(parsed, Some((Jurisdiccion::Nacional, "ley-27078-abc")));
+    }
+
+    #[test]
+    fn parse_law_href_unknown_jurisdiction_returns_none() {
+        // Act / Assert
+        assert_eq!(parse_law_href("/normativa/municipal/ley-1"), None);
+    }
+
+    #[test]
+    fn parse_law_href_missing_slug_returns_none() {
+        // Act / Assert
+        assert_eq!(parse_law_href("/normativa/provincial/"), None);
+        assert_eq!(parse_law_href("/normativa/provincial"), None);
+        assert_eq!(parse_law_href("/otra/provincial/ley-1"), None);
     }
 
     #[test]
