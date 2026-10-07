@@ -3,6 +3,7 @@
 // `fetch` prints one law's details as JSON and saves its text as a PDF.
 
 use std::io::Write;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -52,7 +53,7 @@ enum Command {
         #[arg(long)]
         query: String,
     },
-    /// Print a law's province, title and status as JSON and save its text as `<law>.pdf`.
+    /// Print a law's province, title and status as JSON and save its text as a PDF (default `<law>.pdf`).
     Fetch {
         /// Jurisdiction segment of the law url (only `provincial` is supported for now).
         #[arg(long)]
@@ -60,6 +61,9 @@ enum Command {
         /// Law slug, last segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
         #[arg(long)]
         law: String,
+        /// File the PDF is written to; defaults to `<law>.pdf` in the current directory.
+        #[arg(long, value_name = "FILE_PATH")]
+        output: Option<PathBuf>,
     },
 }
 
@@ -215,7 +219,17 @@ fn parse_results(html: &str, provincia: Option<&str>) -> Result<ResultsPage> {
     Ok(ResultsPage { total_pages, rows })
 }
 
-fn parse_law_page(html: &str, jurisdiccion: Jurisdiccion, ley: &str) -> Result<LawDetails> {
+/// Where the law's PDF goes: `--output` when given, otherwise `<ley>.pdf` in the current directory.
+fn pdf_path(ley: &str, output: Option<&Path>) -> PathBuf {
+    output.map_or_else(|| PathBuf::from(format!("{ley}.pdf")), Path::to_path_buf)
+}
+
+fn parse_law_page(
+    html: &str,
+    jurisdiccion: Jurisdiccion,
+    ley: &str,
+    pdf: &Path,
+) -> Result<LawDetails> {
     let document = Html::parse_document(html);
     let text_of = |css: &str| -> Result<Option<String>> {
         Ok(document
@@ -236,7 +250,7 @@ fn parse_law_page(html: &str, jurisdiccion: Jurisdiccion, ley: &str) -> Result<L
         ley: ley.to_owned(),
         estado: text_of(LAW_STATUS_SELECTOR)?,
         url: law_url(jurisdiccion, ley),
-        pdf: format!("{ley}.pdf"),
+        pdf: pdf.display().to_string(),
     })
 }
 
@@ -350,9 +364,15 @@ async fn wait_for_url_suffix(page: &Page, suffix: &str) -> Result<()> {
     bail!("page url did not end with `{suffix}` after {MAX_POLLS} polls")
 }
 
-async fn run_fetch(page: &Page, jurisdiccion: Jurisdiccion, ley: &str) -> Result<()> {
+async fn run_fetch(
+    page: &Page,
+    jurisdiccion: Jurisdiccion,
+    ley: &str,
+    output: Option<&Path>,
+) -> Result<()> {
+    let pdf = pdf_path(ley, output);
     let html = fetch_html(page, &law_url(jurisdiccion, ley)).await?;
-    let details = parse_law_page(&html, jurisdiccion, ley)?;
+    let details = parse_law_page(&html, jurisdiccion, ley, &pdf)?;
 
     // A second request follows, so honour the crawl delay.
     tokio::time::sleep(CRAWL_DELAY).await;
@@ -373,9 +393,9 @@ async fn run_fetch(page: &Page, jurisdiccion: Jurisdiccion, ley: &str) -> Result
         print_background: Some(true),
         ..Default::default()
     };
-    page.save_pdf(pdf_params, &details.pdf)
+    page.save_pdf(pdf_params, &pdf)
         .await
-        .with_context(|| format!("failed to save {}", details.pdf))?;
+        .with_context(|| format!("failed to save {}", pdf.display()))?;
 
     writeln!(std::io::stdout(), "{}", serde_json::to_string(&details)?)
         .context("failed to write law details to stdout")
@@ -385,7 +405,10 @@ async fn run_fetch(page: &Page, jurisdiccion: Jurisdiccion, ley: &str) -> Result
 async fn main() -> Result<()> {
     // Parse first so `--help` and argument errors never start Chrome.
     let cli = Cli::parse();
-    if let Command::Fetch { jurisdiction, law } = &cli.command {
+    if let Command::Fetch {
+        jurisdiction, law, ..
+    } = &cli.command
+    {
         validate_fetch(*jurisdiction, law)?;
     }
 
@@ -402,7 +425,11 @@ async fn main() -> Result<()> {
     let outcome = match &cli.command {
         Command::List => run_list(&page).await,
         Command::Query { province, query } => run_query(&page, province, query).await,
-        Command::Fetch { jurisdiction, law } => run_fetch(&page, *jurisdiction, law).await,
+        Command::Fetch {
+            jurisdiction,
+            law,
+            output,
+        } => run_fetch(&page, *jurisdiction, law, output.as_deref()).await,
     };
     // Close before propagating the command error so Chrome never outlives us.
     browser.close().await.context("failed to close browser")?;
@@ -594,7 +621,12 @@ mod tests {
     #[test]
     fn parse_law_page_buenos_aires_fixture_returns_province_title_status() -> Result<()> {
         // Act
-        let details = parse_law_page(LAW_FIXTURE, Jurisdiccion::Provincial, LAW_SLUG)?;
+        let details = parse_law_page(
+            LAW_FIXTURE,
+            Jurisdiccion::Provincial,
+            LAW_SLUG,
+            Path::new("out/ley.pdf"),
+        )?;
 
         // Assert
         assert_eq!(
@@ -606,7 +638,7 @@ mod tests {
                 ley: LAW_SLUG.to_owned(),
                 estado: Some("Vigente, de alcance general".to_owned()),
                 url: format!("{SITE_ORIGIN}/normativa/provincial/{LAW_SLUG}"),
-                pdf: format!("{LAW_SLUG}.pdf"),
+                pdf: "out/ley.pdf".to_owned(),
             }
         );
         Ok(())
@@ -618,7 +650,12 @@ mod tests {
         let html = "<html><body><h1>Página no encontrada</h1></body></html>";
 
         // Act
-        let result = parse_law_page(html, Jurisdiccion::Provincial, "ley-1");
+        let result = parse_law_page(
+            html,
+            Jurisdiccion::Provincial,
+            "ley-1",
+            Path::new("ley-1.pdf"),
+        );
 
         // Assert
         assert!(result.is_err_and(|error| error.to_string().contains("law not found")));
@@ -662,7 +699,7 @@ mod tests {
         // Assert
         assert!(matches!(
             cli,
-            Ok(Cli { command: Command::Fetch { jurisdiction: Jurisdiccion::Provincial, law } })
+            Ok(Cli { command: Command::Fetch { jurisdiction: Jurisdiccion::Provincial, law, output: None } })
                 if law == LAW_SLUG
         ));
     }
@@ -691,5 +728,45 @@ mod tests {
 
         // Assert
         assert!(cli.is_err());
+    }
+
+    #[test]
+    fn cli_fetch_with_output_flag_parses_file_path() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "normativa-scraper",
+            "fetch",
+            "--jurisdiction",
+            "provincial",
+            "--law",
+            "ley-1",
+            "--output",
+            "laws/ley-1.pdf",
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Fetch { output: Some(output), .. } })
+                if output == Path::new("laws/ley-1.pdf")
+        ));
+    }
+
+    #[test]
+    fn pdf_path_without_output_defaults_to_law_slug() {
+        // Act
+        let path = pdf_path(LAW_SLUG, None);
+
+        // Assert
+        assert_eq!(path, PathBuf::from(format!("{LAW_SLUG}.pdf")));
+    }
+
+    #[test]
+    fn pdf_path_with_output_uses_given_path() {
+        // Act
+        let path = pdf_path(LAW_SLUG, Some(Path::new("laws/custom.pdf")));
+
+        // Assert
+        assert_eq!(path, PathBuf::from("laws/custom.pdf"));
     }
 }
