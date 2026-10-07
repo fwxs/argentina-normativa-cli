@@ -1,13 +1,15 @@
 // Scrapes provincial "Normativas" from argentina.gob.ar/normativa, driving headless Chrome.
-// `list` prints the provinces of the search form; `query` prints matching laws as JSON lines.
+// `list` prints the provinces of the search form; `query` prints matching laws as JSON lines;
+// `fetch` prints one law's details as JSON and saves its text as a PDF.
 
 use std::io::Write;
 use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow};
+use anyhow::{Context, Result, anyhow, bail};
 use chromiumoxide::browser::{Browser, BrowserConfig};
+use chromiumoxide::cdp::browser_protocol::page::PrintToPdfParams;
 use chromiumoxide::page::Page;
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 use futures::StreamExt;
 use scraper::{Html, Selector};
 use serde::Serialize;
@@ -21,6 +23,13 @@ const PAGE_SIZE: &str = "50";
 const TIPO_NORMA: &str = "Ley";
 // robots.txt asks for `Crawl-delay: 10`.
 const CRAWL_DELAY: Duration = Duration::from_secs(10);
+
+const PROVINCE_SELECTOR: &str = ".label";
+const LAW_TITLE_SELECTOR: &str = "h1.h5";
+const LAW_STATUS_SELECTOR: &str = "p.m-b-0:nth-child(4) > small:nth-child(1)";
+const VIEW_LAW_BUTTON_SELECTOR: &str = "a.btn.btn-primary";
+// The "Ver norma" button leads to `<law url>/actualizacion`, the page holding the law text.
+const VIEW_LAW_PATH_SUFFIX: &str = "/actualizacion";
 
 /// Scraper for provincial laws published on argentina.gob.ar/normativa.
 #[derive(Debug, Parser)]
@@ -43,6 +52,26 @@ enum Command {
         #[arg(long)]
         query: String,
     },
+    /// Print a law's province, title and status as JSON and save its text as `<law>.pdf`.
+    Fetch {
+        /// Jurisdiction segment of the law url (only `provincial` is supported for now).
+        #[arg(long)]
+        jurisdiction: Jurisdiccion,
+        /// Law slug, last segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
+        #[arg(long)]
+        law: String,
+    },
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+struct LawDetails {
+    provincia: String,
+    jurisdiccion: Jurisdiccion,
+    titulo: String,
+    ley: String,
+    estado: Option<String>,
+    url: String,
+    pdf: String,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -58,7 +87,7 @@ struct Normativa {
     descripcion: Vec<String>,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, ValueEnum)]
 #[serde(rename_all = "lowercase")]
 enum Jurisdiccion {
     Provincial,
@@ -72,6 +101,28 @@ impl Jurisdiccion {
             "nacional" => Some(Self::Nacional),
             _ => None,
         }
+    }
+
+    fn path_segment(self) -> &'static str {
+        match self {
+            Self::Provincial => "provincial",
+            Self::Nacional => "nacional",
+        }
+    }
+}
+
+/// `--law` ends up in a url path and a file name, so only slug characters are allowed.
+fn validate_law_slug(ley: &str) -> Result<()> {
+    if ley.is_empty() || !ley.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+        bail!("invalid law `{ley}`: expected a slug of letters, digits and dashes");
+    }
+    Ok(())
+}
+
+fn validate_fetch(jurisdiccion: Jurisdiccion, ley: &str) -> Result<()> {
+    match jurisdiccion {
+        Jurisdiccion::Provincial => validate_law_slug(ley),
+        Jurisdiccion::Nacional => bail!("fetching `nacional` laws is not supported yet"),
     }
 }
 
@@ -164,6 +215,38 @@ fn parse_results(html: &str, provincia: Option<&str>) -> Result<ResultsPage> {
     Ok(ResultsPage { total_pages, rows })
 }
 
+fn parse_law_page(html: &str, jurisdiccion: Jurisdiccion, ley: &str) -> Result<LawDetails> {
+    let document = Html::parse_document(html);
+    let text_of = |css: &str| -> Result<Option<String>> {
+        Ok(document
+            .select(&selector(css)?)
+            .next()
+            .map(|element| collapse_whitespace(&element.text().collect::<String>()))
+            .filter(|text| !text.is_empty()))
+    };
+    let (Some(provincia), Some(titulo)) =
+        (text_of(PROVINCE_SELECTOR)?, text_of(LAW_TITLE_SELECTOR)?)
+    else {
+        bail!("law not found: no province or title on the page; check `--law`");
+    };
+    Ok(LawDetails {
+        provincia,
+        jurisdiccion,
+        titulo,
+        ley: ley.to_owned(),
+        estado: text_of(LAW_STATUS_SELECTOR)?,
+        url: law_url(jurisdiccion, ley),
+        pdf: format!("{ley}.pdf"),
+    })
+}
+
+fn law_url(jurisdiccion: Jurisdiccion, ley: &str) -> String {
+    format!(
+        "{SITE_ORIGIN}{SEARCH_PATH}/{}/{ley}",
+        jurisdiccion.path_segment()
+    )
+}
+
 fn search_url(provincia: &str, query: &str, page_number: usize) -> Result<String> {
     let page_number = page_number.to_string();
     let url = Url::parse_with_params(
@@ -253,10 +336,58 @@ async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
     Ok(())
 }
 
+// The click only starts the navigation, so poll until the page url shows it happened.
+async fn wait_for_url_suffix(page: &Page, suffix: &str) -> Result<()> {
+    const POLL_INTERVAL: Duration = Duration::from_millis(250);
+    const MAX_POLLS: u32 = 60;
+    for _ in 0..MAX_POLLS {
+        let current = page.url().await.context("failed to read page url")?;
+        if current.as_deref().is_some_and(|url| url.ends_with(suffix)) {
+            return Ok(());
+        }
+        tokio::time::sleep(POLL_INTERVAL).await;
+    }
+    bail!("page url did not end with `{suffix}` after {MAX_POLLS} polls")
+}
+
+async fn run_fetch(page: &Page, jurisdiccion: Jurisdiccion, ley: &str) -> Result<()> {
+    let html = fetch_html(page, &law_url(jurisdiccion, ley)).await?;
+    let details = parse_law_page(&html, jurisdiccion, ley)?;
+
+    // A second request follows, so honour the crawl delay.
+    tokio::time::sleep(CRAWL_DELAY).await;
+    page.find_element(VIEW_LAW_BUTTON_SELECTOR)
+        .await
+        .context("failed to find the \"Ver norma\" button")?
+        .click()
+        .await
+        .context("failed to click the \"Ver norma\" button")?;
+    wait_for_url_suffix(page, VIEW_LAW_PATH_SUFFIX)
+        .await
+        .context("clicking \"Ver norma\" did not open the law text page")?;
+    page.wait_for_navigation()
+        .await
+        .context("failed to load the law text page")?;
+
+    let pdf_params = PrintToPdfParams {
+        print_background: Some(true),
+        ..Default::default()
+    };
+    page.save_pdf(pdf_params, &details.pdf)
+        .await
+        .with_context(|| format!("failed to save {}", details.pdf))?;
+
+    writeln!(std::io::stdout(), "{}", serde_json::to_string(&details)?)
+        .context("failed to write law details to stdout")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     // Parse first so `--help` and argument errors never start Chrome.
     let cli = Cli::parse();
+    if let Command::Fetch { jurisdiction, law } = &cli.command {
+        validate_fetch(*jurisdiction, law)?;
+    }
 
     // stdout carries data only; logs go to stderr.
     tracing_subscriber::fmt()
@@ -271,6 +402,7 @@ async fn main() -> Result<()> {
     let outcome = match &cli.command {
         Command::List => run_list(&page).await,
         Command::Query { province, query } => run_query(&page, province, query).await,
+        Command::Fetch { jurisdiction, law } => run_fetch(&page, *jurisdiction, law).await,
     };
     // Close before propagating the command error so Chrome never outlives us.
     browser.close().await.context("failed to close browser")?;
@@ -287,6 +419,8 @@ mod tests {
     use super::*;
 
     const RESULTS_FIXTURE: &str = include_str!("../tests/fixtures/results.html");
+    const LAW_FIXTURE: &str = include_str!("../tests/fixtures/law.html");
+    const LAW_SLUG: &str = "ley-14709-123456789-0abc-defg-907-4100bvorpyel";
 
     #[test]
     fn parse_results_buenos_aires_laws_page_returns_fifty_rows_over_three_pages() -> Result<()> {
@@ -452,6 +586,108 @@ mod tests {
     fn cli_query_without_province_fails() {
         // Act
         let cli = Cli::try_parse_from(["normativa-scraper", "query", "--query", "impuesto"]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn parse_law_page_buenos_aires_fixture_returns_province_title_status() -> Result<()> {
+        // Act
+        let details = parse_law_page(LAW_FIXTURE, Jurisdiccion::Provincial, LAW_SLUG)?;
+
+        // Assert
+        assert_eq!(
+            details,
+            LawDetails {
+                provincia: "Buenos Aires".to_owned(),
+                jurisdiccion: Jurisdiccion::Provincial,
+                titulo: "Ley 14709".to_owned(),
+                ley: LAW_SLUG.to_owned(),
+                estado: Some("Vigente, de alcance general".to_owned()),
+                url: format!("{SITE_ORIGIN}/normativa/provincial/{LAW_SLUG}"),
+                pdf: format!("{LAW_SLUG}.pdf"),
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_law_page_page_without_label_returns_not_found_error() {
+        // Arrange
+        let html = "<html><body><h1>Página no encontrada</h1></body></html>";
+
+        // Act
+        let result = parse_law_page(html, Jurisdiccion::Provincial, "ley-1");
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("law not found")));
+    }
+
+    #[test]
+    fn validate_law_slug_real_slug_is_accepted() {
+        // Act / Assert
+        assert!(validate_law_slug(LAW_SLUG).is_ok());
+    }
+
+    #[test]
+    fn validate_law_slug_path_like_or_empty_values_are_rejected() {
+        // Act / Assert
+        for invalid in ["", "../x", "a/b", "ley 1", "ley-1.pdf", "ley\u{301}"] {
+            assert!(validate_law_slug(invalid).is_err(), "accepted `{invalid}`");
+        }
+    }
+
+    #[test]
+    fn validate_fetch_nacional_returns_unsupported_error() {
+        // Act
+        let result = validate_fetch(Jurisdiccion::Nacional, "ley-1");
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("not supported yet")));
+    }
+
+    #[test]
+    fn cli_fetch_with_flags_parses_jurisdiction_and_law() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "normativa-scraper",
+            "fetch",
+            "--jurisdiction",
+            "provincial",
+            "--law",
+            LAW_SLUG,
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Fetch { jurisdiction: Jurisdiccion::Provincial, law } })
+                if law == LAW_SLUG
+        ));
+    }
+
+    #[test]
+    fn cli_fetch_unknown_jurisdiction_fails() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "normativa-scraper",
+            "fetch",
+            "--jurisdiction",
+            "municipal",
+            "--law",
+            "ley-1",
+        ]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn cli_fetch_without_law_fails() {
+        // Act
+        let cli =
+            Cli::try_parse_from(["normativa-scraper", "fetch", "--jurisdiction", "provincial"]);
 
         // Assert
         assert!(cli.is_err());
