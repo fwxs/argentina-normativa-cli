@@ -60,6 +60,29 @@ Example line (wrapped for readability):
 
 The `ley` field is the law slug you pass to `fetch`. Results are paged (50 per page) and all pages are fetched.
 
+#### `query national`
+
+Searches national norms (laws, decrees, resolutions, ...) with the filters of the site's national form.
+At least one filter is required.
+
+```bash
+argentina-normativa-cli query national --law-type decretos --from-date 2024-01-01 --to-date 2024-01-31
+argentina-normativa-cli query national --query "impuesto" --agency "MINISTERIO DE ECONOMIA"
+```
+
+| Option | Description |
+| --- | --- |
+| `--law-type <slug>` | "Tipo de norma": `leyes`, `decretos`, `resoluciones`, `disposiciones`, ... (see `--help`). |
+| `--law-number <n>` | "Número": digits only. |
+| `--year <yyyy>` | "Año". The site finds nothing for `leyes` + year; use the dates for laws. |
+| `--agency <name>` | "Organismo o dependencia": exact upper-case name as the site lists it. |
+| `--from-date <YYYY-MM-DD>` | "Publicación desde". |
+| `--to-date <YYYY-MM-DD>` | "Publicación hasta". |
+| `--query <keywords>` | "Buscá por palabras clave". |
+
+Output lines have the same shape as the provincial ones, with `"provincia": null`, `"jurisdiccion": "nacional"`, an
+extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`. `fetch` does not support national norms yet.
+
 ### `fetch`
 
 Opens a law page, prints its province, title and status as JSON, then follows the "Ver norma" button and saves the
