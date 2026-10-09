@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`normativa-scraper`: a Rust (edition 2024) CLI that drives headless Chrome against
+`argentina-normativa-cli`: a Rust (edition 2024) CLI that drives headless Chrome against
 https://www.argentina.gob.ar/normativa to collect **provincial laws** (`Ley`). It needs a system Chrome
 (`chromiumoxide` launches it; no bundled browser). Law PDFs written by `fetch` land in the working directory.
 
@@ -15,11 +15,11 @@ cargo fmt --all
 cargo clippy --all-targets --all-features -- -D warnings
 cargo test --all                       # offline, fixture-based
 cargo test parse_law_page              # single test (substring match on the test name)
-cargo build --release                  # binary: target/release/normativa-scraper
+cargo build --release                  # binary: target/release/argentina-normativa-cli
 
-normativa-scraper list                                         # provinces as a JSON array
-normativa-scraper query --province "Córdoba" --query "impuesto tasa"   # JSON lines
-normativa-scraper fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
+argentina-normativa-cli list                                         # provinces as a JSON array
+argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"   # JSON lines
+argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
 ```
 
 `cargo clippy`/`cargo test` do not produce `target/release/...`; build it explicitly before live runs.
