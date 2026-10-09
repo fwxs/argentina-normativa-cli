@@ -84,6 +84,9 @@ struct Normativa {
     jurisdiccion: Jurisdiccion,
     tipo_norma: String,
     titulo: String,
+    // Issuing agency; only national rows carry it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    organismo: Option<String>,
     // Last path segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
     ley: String,
     url: String,
@@ -167,24 +170,59 @@ fn parse_options(html: &str, select_name: &str) -> Result<Vec<String>> {
         .collect())
 }
 
+/// Pages in the results counter: provincial "<total> normas encontradas en <pages> páginas" has the
+/// page count in its second `span`; national has it only as text ("... en 25 páginas").
+fn parse_total_pages(document: &Html) -> Result<usize> {
+    let provincial_counter = selector("div.m-b-2 span.fw-bold")?;
+    let national_counter = selector("div.infoleg-search-results-count")?;
+
+    let national_pages = document
+        .select(&national_counter)
+        .next()
+        .and_then(|counter| {
+            let text = collapse_whitespace(&counter.text().collect::<String>());
+            let words: Vec<&str> = text.split(' ').collect();
+            words
+                .windows(3)
+                .find(|window| window[0] == "en" && window[2].starts_with("página"))
+                .and_then(|window| window[1].parse().ok())
+        });
+    let provincial_pages = || {
+        document
+            .select(&provincial_counter)
+            .nth(1)
+            .and_then(|span| {
+                collapse_whitespace(&span.text().collect::<String>())
+                    .parse()
+                    .ok()
+            })
+    };
+    // Absent counter means nothing matched.
+    Ok(national_pages.or_else(provincial_pages).unwrap_or(0))
+}
+
+/// "Resolución GENERAL 5911/2026" -> "Resolución GENERAL": the words before the number.
+fn norm_type_from_title(titulo: &str) -> String {
+    let words: Vec<&str> = titulo
+        .split_whitespace()
+        .take_while(|word| !word.starts_with(|c: char| c.is_ascii_digit()))
+        .collect();
+    if words.is_empty() {
+        titulo.to_owned()
+    } else {
+        words.join(" ")
+    }
+}
+
 fn parse_results(html: &str, provincia: Option<&str>) -> Result<ResultsPage> {
     let document = Html::parse_document(html);
-    let row_selector = selector("#normas tbody tr")?;
+    let row_selector = selector("tbody tr")?;
     let link_selector = selector(r#"td[data-label="Normativa"] a"#)?;
+    let agency_selector = selector(r#"td[data-label="Normativa"] p.small"#)?;
     let time_selector = selector("time[datetime]")?;
     let description_selector = selector(r#"td[data-label="Descripción"] p.small"#)?;
-    let counter_selector = selector("div.m-b-2 span.fw-bold")?;
 
-    // Counter reads "<total> normas encontradas en <pages> páginas"; absent when nothing matched.
-    let total_pages = document
-        .select(&counter_selector)
-        .nth(1)
-        .and_then(|span| {
-            collapse_whitespace(&span.text().collect::<String>())
-                .parse()
-                .ok()
-        })
-        .unwrap_or(0);
+    let total_pages = parse_total_pages(&document)?;
 
     let rows = document
         .select(&row_selector)
@@ -195,11 +233,19 @@ fn parse_results(html: &str, provincia: Option<&str>) -> Result<ResultsPage> {
                 tracing::warn!(href, "unrecognised normativa link");
                 return None;
             };
+            let titulo = collapse_whitespace(&link.text().collect::<String>());
             Some(Normativa {
                 provincia: provincia.map(str::to_owned),
                 jurisdiccion,
-                tipo_norma: TIPO_NORMA.to_owned(),
-                titulo: collapse_whitespace(&link.text().collect::<String>()),
+                tipo_norma: match jurisdiccion {
+                    Jurisdiccion::Provincial => TIPO_NORMA.to_owned(),
+                    Jurisdiccion::Nacional => norm_type_from_title(&titulo),
+                },
+                titulo,
+                organismo: row
+                    .select(&agency_selector)
+                    .map(|paragraph| collapse_whitespace(&paragraph.text().collect::<String>()))
+                    .find(|text| !text.is_empty()),
                 ley: ley.to_owned(),
                 url: format!("{SITE_ORIGIN}{href}"),
                 fecha_publicacion: row
@@ -319,17 +365,23 @@ async fn run_list(page: &Page) -> Result<()> {
     .context("failed to write provinces to stdout")
 }
 
-async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
-    let mut page_number = 1;
+/// Walks every results page of a search, printing each law as a JSON line; returns the row count.
+/// `url_for_page` takes a 0-based page index. The total page count comes from the first page.
+async fn run_search(
+    page: &Page,
+    provincia: Option<&str>,
+    url_for_page: impl Fn(usize) -> Result<String>,
+) -> Result<usize> {
+    let mut page_index = 0;
     let mut total_pages = 1;
     let mut written = 0usize;
-    while page_number <= total_pages {
-        if page_number > 1 {
+    while page_index < total_pages {
+        if page_index > 0 {
             tokio::time::sleep(CRAWL_DELAY).await;
         }
-        let html = fetch_html(page, &search_url(provincia, query, page_number)?).await?;
-        let results = parse_results(&html, Some(provincia))?;
-        if page_number == 1 {
+        let html = fetch_html(page, &url_for_page(page_index)?).await?;
+        let results = parse_results(&html, provincia)?;
+        if page_index == 0 {
             total_pages = results.total_pages;
         }
         for normativa in &results.rows {
@@ -337,9 +389,18 @@ async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
                 .context("failed to write normativa to stdout")?;
             written += 1;
         }
-        tracing::info!(provincia, page_number, total_pages, "page fetched");
-        page_number += 1;
+        tracing::info!(page_number = page_index + 1, total_pages, "page fetched");
+        page_index += 1;
     }
+    Ok(written)
+}
+
+async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
+    // The provincial site's `offset` is a 1-based page number.
+    let written = run_search(page, Some(provincia), |page_index| {
+        search_url(provincia, query, page_index + 1)
+    })
+    .await?;
     if written == 0 {
         tracing::warn!(
             provincia,
@@ -446,6 +507,7 @@ mod tests {
     use super::*;
 
     const RESULTS_FIXTURE: &str = include_str!("../tests/fixtures/results.html");
+    const NATIONAL_RESULTS_FIXTURE: &str = include_str!("../tests/fixtures/results_national.html");
     const LAW_FIXTURE: &str = include_str!("../tests/fixtures/law.html");
     const LAW_SLUG: &str = "ley-14709-123456789-0abc-defg-907-4100bvorpyel";
 
@@ -506,6 +568,80 @@ mod tests {
         assert!(json.contains(r#""jurisdiccion":"nacional""#));
         assert!(json.contains(r#""ley":"ley-1-abc""#));
         Ok(())
+    }
+
+    #[test]
+    fn parse_results_national_fixture_returns_five_rows_over_212_pages() -> Result<()> {
+        // Act
+        let results = parse_results(NATIONAL_RESULTS_FIXTURE, None)?;
+
+        // Assert
+        assert_eq!(results.total_pages, 212);
+        assert_eq!(results.rows.len(), 5);
+        let first = &results.rows[0];
+        assert_eq!(first.provincia, None);
+        assert_eq!(first.jurisdiccion, Jurisdiccion::Nacional);
+        assert_eq!(first.tipo_norma, "Ley");
+        assert_eq!(first.titulo, "Ley 27826");
+        assert_eq!(first.ley, "norma-431078");
+        assert_eq!(
+            first.url,
+            format!("{SITE_ORIGIN}/normativa/nacional/norma-431078")
+        );
+        assert_eq!(
+            first.organismo.as_deref(),
+            Some("HONORABLE CONGRESO DE LA NACION ARGENTINA")
+        );
+        assert_eq!(first.fecha_publicacion.as_deref(), Some("2026-10-09"));
+        assert_eq!(first.descripcion.len(), 3);
+        assert_eq!(results.rows[1].tipo_norma, "Resolución GENERAL");
+        Ok(())
+    }
+
+    #[test]
+    fn parse_results_national_zero_results_page_returns_empty() -> Result<()> {
+        // Arrange
+        let html = r#"<div class="infoleg-search-results-count m-b-2">
+            <span class="fw-semibold">0</span> norma encontrada</div>
+            <table><tbody><tr><td colspan="3">No se encontraron resultados</td></tr></tbody></table>"#;
+
+        // Act
+        let results = parse_results(html, None)?;
+
+        // Assert
+        assert_eq!(
+            results,
+            ResultsPage {
+                total_pages: 0,
+                rows: vec![]
+            }
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_results_provincial_row_omits_organismo_from_json() -> Result<()> {
+        // Act
+        let results = parse_results(RESULTS_FIXTURE, Some("Buenos Aires"))?;
+        let json = serde_json::to_string(&results.rows[0])?;
+
+        // Assert
+        assert!(!json.contains("organismo"));
+        Ok(())
+    }
+
+    #[test]
+    fn norm_type_from_title_drops_number_and_year() {
+        // Act / Assert
+        assert_eq!(
+            norm_type_from_title("Resolución GENERAL 5911/2026"),
+            "Resolución GENERAL"
+        );
+        assert_eq!(
+            norm_type_from_title("Decisión Administrativa 3/2024"),
+            "Decisión Administrativa"
+        );
+        assert_eq!(norm_type_from_title("27826"), "27826");
     }
 
     #[test]
