@@ -578,7 +578,7 @@ mod tests {
     #[test]
     fn cli_list_without_arguments_parses() {
         // Act
-        let cli = Cli::try_parse_from(["normativa-scraper", "list"]);
+        let cli = Cli::try_parse_from(["argentina-normativa-cli", "list"]);
 
         // Assert
         assert!(matches!(
@@ -593,7 +593,7 @@ mod tests {
     fn cli_query_with_flags_parses_province_and_query() {
         // Act
         let cli = Cli::try_parse_from([
-            "normativa-scraper",
+            "argentina-normativa-cli",
             "query",
             "--province",
             "Córdoba",
@@ -612,7 +612,7 @@ mod tests {
     #[test]
     fn cli_query_without_province_fails() {
         // Act
-        let cli = Cli::try_parse_from(["normativa-scraper", "query", "--query", "impuesto"]);
+        let cli = Cli::try_parse_from(["argentina-normativa-cli", "query", "--query", "impuesto"]);
 
         // Assert
         assert!(cli.is_err());
@@ -688,7 +688,7 @@ mod tests {
     fn cli_fetch_with_flags_parses_jurisdiction_and_law() {
         // Act
         let cli = Cli::try_parse_from([
-            "normativa-scraper",
+            "argentina-normativa-cli",
             "fetch",
             "--jurisdiction",
             "provincial",
@@ -708,7 +708,7 @@ mod tests {
     fn cli_fetch_unknown_jurisdiction_fails() {
         // Act
         let cli = Cli::try_parse_from([
-            "normativa-scraper",
+            "argentina-normativa-cli",
             "fetch",
             "--jurisdiction",
             "municipal",
@@ -723,8 +723,12 @@ mod tests {
     #[test]
     fn cli_fetch_without_law_fails() {
         // Act
-        let cli =
-            Cli::try_parse_from(["normativa-scraper", "fetch", "--jurisdiction", "provincial"]);
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "fetch",
+            "--jurisdiction",
+            "provincial",
+        ]);
 
         // Assert
         assert!(cli.is_err());
@@ -734,7 +738,7 @@ mod tests {
     fn cli_fetch_with_output_flag_parses_file_path() {
         // Act
         let cli = Cli::try_parse_from([
-            "normativa-scraper",
+            "argentina-normativa-cli",
             "fetch",
             "--jurisdiction",
             "provincial",

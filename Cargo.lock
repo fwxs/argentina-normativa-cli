@@ -68,6 +68,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "argentina-normativa-cli"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "chromiumoxide",
+ "clap",
+ "futures",
+ "pretty_assertions",
+ "scraper",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+ "url",
+]
+
+[[package]]
 name = "async-tungstenite"
 version = "0.32.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -841,24 +859,6 @@ name = "new_debug_unreachable"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
-
-[[package]]
-name = "normativa-scraper"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "chromiumoxide",
- "clap",
- "futures",
- "pretty_assertions",
- "scraper",
- "serde",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
- "url",
-]
 
 [[package]]
 name = "nu-ansi-term"
