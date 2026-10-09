@@ -1,5 +1,6 @@
-// Scrapes provincial "Normativas" from argentina.gob.ar/normativa, driving headless Chrome.
-// `list` prints the provinces of the search form; `query` prints matching laws as JSON lines;
+// Scrapes "Normativas" from argentina.gob.ar/normativa, driving headless Chrome.
+// `list` prints the provinces of the search form; `query` prints matching provincial laws (or, with
+// `query national`, national norms) as JSON lines;
 // `fetch` prints one law's details as JSON and saves its text as a PDF.
 
 use std::io::Write;
@@ -10,7 +11,8 @@ use anyhow::{Context, Result, anyhow, bail};
 use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::page::PrintToPdfParams;
 use chromiumoxide::page::Page;
-use clap::{Parser, Subcommand, ValueEnum};
+use clap::builder::PossibleValuesParser;
+use clap::{Args, Parser, Subcommand, ValueEnum, value_parser};
 use futures::StreamExt;
 use scraper::{Html, Selector};
 use serde::Serialize;
@@ -22,6 +24,35 @@ const SEARCH_PATH: &str = "/normativa";
 const PAGE_SIZE: &str = "50";
 // The site's provincial search only accepts this norm type (the form field is disabled with it).
 const TIPO_NORMA: &str = "Ley";
+// `tipo_norma` slugs of the national search form; an empty value searches every type.
+const LAW_TYPES: &[&str] = &[
+    "leyes",
+    "decretos",
+    "decisiones_administrativas",
+    "resoluciones",
+    "disposiciones",
+    "acordadas",
+    "actas",
+    "actuaciones",
+    "acuerdos",
+    "circulares",
+    "comunicaciones",
+    "comunicados",
+    "convenios",
+    "decisiones",
+    "decretos_ley",
+    "directivas",
+    "instrucciones",
+    "interpretacion",
+    "laudos",
+    "memorandums",
+    "misiones",
+    "notas",
+    "notas_externas",
+    "protocolos",
+    "providencias",
+    "recomendaciones",
+];
 // robots.txt asks for `Crawl-delay: 10`.
 const CRAWL_DELAY: Duration = Duration::from_secs(10);
 
@@ -44,14 +75,17 @@ struct Cli {
 enum Command {
     /// Print the provinces of the "Elegí una provincia" select box as a JSON array.
     List,
-    /// Search the laws of one province and print them as JSON lines on stdout.
+    /// Search the laws of one province (or, with `national`, national norms) as JSON lines on stdout.
+    #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Query {
         /// Province name exactly as printed by `list`.
-        #[arg(long)]
-        province: String,
+        #[arg(long, required = true)]
+        province: Option<String>,
         /// Keywords for "Buscá por palabras clave", e.g. "impuesto tasa".
-        #[arg(long)]
-        query: String,
+        #[arg(long, required = true)]
+        query: Option<String>,
+        #[command(subcommand)]
+        scope: Option<QueryScope>,
     },
     /// Print a law's province, title and status as JSON and save its text as a PDF (default `<law>.pdf`).
     Fetch {
@@ -65,6 +99,38 @@ enum Command {
         #[arg(long, value_name = "FILE_PATH")]
         output: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum QueryScope {
+    /// Search national norms with the filters of the site's national form.
+    National(NationalFilters),
+}
+
+/// Fields of the national search form; every one is optional but at least one must be given.
+#[derive(Debug, Default, Args, PartialEq)]
+struct NationalFilters {
+    /// "Tipo de norma": site slug, e.g. leyes, decretos, resoluciones.
+    #[arg(long, value_parser = PossibleValuesParser::new(LAW_TYPES.iter().copied()))]
+    law_type: Option<String>,
+    /// "Número": norm number, digits only.
+    #[arg(long, value_parser = value_parser!(u64))]
+    law_number: Option<u64>,
+    /// "Año": four-digit year.
+    #[arg(long, value_parser = value_parser!(u16).range(1853..=2100))]
+    year: Option<u16>,
+    /// "Organismo o dependencia": exact (upper-case) agency name as listed by the site.
+    #[arg(long)]
+    agency: Option<String>,
+    /// "Publicación desde": YYYY-MM-DD.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    from_date: Option<String>,
+    /// "Publicación hasta": YYYY-MM-DD.
+    #[arg(long, value_name = "YYYY-MM-DD")]
+    to_date: Option<String>,
+    /// Keywords for "Buscá por palabras clave", e.g. "impuesto".
+    #[arg(long)]
+    query: Option<String>,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -131,6 +197,48 @@ fn validate_fetch(jurisdiccion: Jurisdiccion, ley: &str) -> Result<()> {
         Jurisdiccion::Provincial => validate_law_slug(ley),
         Jurisdiccion::Nacional => bail!("fetching `nacional` laws is not supported yet"),
     }
+}
+
+/// The site only accepts ISO dates in the url (`dd-mm-aaaa`, the form's placeholder, finds nothing).
+fn validate_iso_date(flag: &str, value: &str) -> Result<()> {
+    let parts: Vec<&str> = value.split('-').collect();
+    let is_valid = value.chars().all(|c| c.is_ascii_digit() || c == '-')
+        && match parts.as_slice() {
+            [year, month, day] if year.len() == 4 && month.len() == 2 && day.len() == 2 => {
+                matches!(
+                    (month.parse::<u32>(), day.parse::<u32>()),
+                    (Ok(1..=12), Ok(1..=31))
+                )
+            }
+            _ => false,
+        };
+    if !is_valid {
+        bail!("invalid {flag} `{value}`: expected YYYY-MM-DD");
+    }
+    Ok(())
+}
+
+fn validate_national(filters: &NationalFilters) -> Result<()> {
+    if *filters == NationalFilters::default() {
+        // An unfiltered search is every norm (~200 pages at one page per crawl delay).
+        bail!("pass at least one filter, e.g. --query or --law-type");
+    }
+    // The site answers this combination with a page that has no results block at all.
+    if filters.law_type.as_deref() == Some("leyes") && filters.year.is_some() {
+        bail!("--year finds no `leyes` on the site; use --from-date and --to-date instead");
+    }
+    if let Some(from_date) = &filters.from_date {
+        validate_iso_date("--from-date", from_date)?;
+    }
+    if let Some(to_date) = &filters.to_date {
+        validate_iso_date("--to-date", to_date)?;
+    }
+    if let (Some(from_date), Some(to_date)) = (&filters.from_date, &filters.to_date)
+        && from_date > to_date
+    {
+        bail!("--from-date {from_date} is after --to-date {to_date}");
+    }
+    Ok(())
 }
 
 /// Splits a law link `/normativa/<jurisdiccion>/<ley>` into its jurisdiction and law slug.
@@ -325,6 +433,39 @@ fn search_url(provincia: &str, query: &str, page_number: usize) -> Result<String
     Ok(url.into())
 }
 
+/// National search url; the site wants every field present (empty when unused) and a 0-based `page`.
+fn national_search_url(filters: &NationalFilters, page_index: usize) -> Result<String> {
+    let law_number = filters.law_number.map(|number| number.to_string());
+    let year = filters.year.map(|year| year.to_string());
+    let page_index = page_index.to_string();
+    let url = Url::parse_with_params(
+        &format!("{SITE_ORIGIN}{SEARCH_PATH}"),
+        [
+            ("jurisdiccion", "nacional"),
+            (
+                "tipo_norma",
+                filters.law_type.as_deref().unwrap_or_default(),
+            ),
+            ("numero", law_number.as_deref().unwrap_or_default()),
+            ("anio", year.as_deref().unwrap_or_default()),
+            ("dependencia", filters.agency.as_deref().unwrap_or_default()),
+            (
+                "publicacion_desde",
+                filters.from_date.as_deref().unwrap_or_default(),
+            ),
+            (
+                "publicacion_hasta",
+                filters.to_date.as_deref().unwrap_or_default(),
+            ),
+            ("texto", filters.query.as_deref().unwrap_or_default()),
+            ("s", "1"),
+            ("page", page_index.as_str()),
+        ],
+    )
+    .context("failed to build national search url")?;
+    Ok(url.into())
+}
+
 async fn fetch_html(page: &Page, url: &str) -> Result<String> {
     page.goto(url)
         .await
@@ -411,6 +552,17 @@ async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
     Ok(())
 }
 
+async fn run_query_national(page: &Page, filters: &NationalFilters) -> Result<()> {
+    let written = run_search(page, None, |page_index| {
+        national_search_url(filters, page_index)
+    })
+    .await?;
+    if written == 0 {
+        tracing::warn!("no results; check the filters (agency names must match exactly)");
+    }
+    Ok(())
+}
+
 // The click only starts the navigation, so poll until the page url shows it happened.
 async fn wait_for_url_suffix(page: &Page, suffix: &str) -> Result<()> {
     const POLL_INTERVAL: Duration = Duration::from_millis(250);
@@ -466,11 +618,15 @@ async fn run_fetch(
 async fn main() -> Result<()> {
     // Parse first so `--help` and argument errors never start Chrome.
     let cli = Cli::parse();
-    if let Command::Fetch {
-        jurisdiction, law, ..
-    } = &cli.command
-    {
-        validate_fetch(*jurisdiction, law)?;
+    match &cli.command {
+        Command::Fetch {
+            jurisdiction, law, ..
+        } => validate_fetch(*jurisdiction, law)?,
+        Command::Query {
+            scope: Some(QueryScope::National(filters)),
+            ..
+        } => validate_national(filters)?,
+        Command::List | Command::Query { .. } => {}
     }
 
     // stdout carries data only; logs go to stderr.
@@ -485,7 +641,17 @@ async fn main() -> Result<()> {
     let (mut browser, handler_task, page) = launch_browser().await?;
     let outcome = match &cli.command {
         Command::List => run_list(&page).await,
-        Command::Query { province, query } => run_query(&page, province, query).await,
+        Command::Query {
+            scope: Some(QueryScope::National(filters)),
+            ..
+        } => run_query_national(&page, filters).await,
+        Command::Query {
+            province: Some(province),
+            query: Some(query),
+            ..
+        } => run_query(&page, province, query).await,
+        // clap requires both flags unless a subcommand is given.
+        Command::Query { .. } => bail!("--province and --query are required"),
         Command::Fetch {
             jurisdiction,
             law,
@@ -740,7 +906,7 @@ mod tests {
         // Assert
         assert!(matches!(
             cli,
-            Ok(Cli { command: Command::Query { province, query } })
+            Ok(Cli { command: Command::Query { province: Some(province), query: Some(query), scope: None } })
                 if province == "Córdoba" && query == "impuesto tasa"
         ));
     }
@@ -749,6 +915,211 @@ mod tests {
     fn cli_query_without_province_fails() {
         // Act
         let cli = Cli::try_parse_from(["argentina-normativa-cli", "query", "--query", "impuesto"]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn national_search_url_full_filters_are_encoded_in_site_order() -> Result<()> {
+        // Arrange
+        let filters = NationalFilters {
+            law_type: Some("decretos".to_owned()),
+            law_number: Some(70),
+            year: Some(2023),
+            agency: Some("MINISTERIO DE ECONOMIA".to_owned()),
+            from_date: Some("2023-01-01".to_owned()),
+            to_date: Some("2023-12-31".to_owned()),
+            query: Some("impuesto tasa".to_owned()),
+        };
+
+        // Act
+        let url = national_search_url(&filters, 2)?;
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://www.argentina.gob.ar/normativa?jurisdiccion=nacional&tipo_norma=decretos\
+             &numero=70&anio=2023&dependencia=MINISTERIO+DE+ECONOMIA\
+             &publicacion_desde=2023-01-01&publicacion_hasta=2023-12-31\
+             &texto=impuesto+tasa&s=1&page=2"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn national_search_url_only_query_keeps_empty_fields() -> Result<()> {
+        // Arrange
+        let filters = NationalFilters {
+            query: Some("impuesto".to_owned()),
+            ..Default::default()
+        };
+
+        // Act
+        let url = national_search_url(&filters, 0)?;
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://www.argentina.gob.ar/normativa?jurisdiccion=nacional&tipo_norma=&numero=\
+             &anio=&dependencia=&publicacion_desde=&publicacion_hasta=&texto=impuesto&s=1&page=0"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn validate_national_no_filters_is_rejected() {
+        // Act
+        let result = validate_national(&NationalFilters::default());
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("at least one filter")));
+    }
+
+    #[test]
+    fn validate_national_leyes_with_year_is_rejected() {
+        // Arrange
+        let filters = NationalFilters {
+            law_type: Some("leyes".to_owned()),
+            year: Some(2024),
+            ..Default::default()
+        };
+
+        // Act / Assert
+        assert!(validate_national(&filters).is_err());
+    }
+
+    #[test]
+    fn validate_national_bad_dates_are_rejected() {
+        // Act / Assert
+        for invalid in [
+            "01-01-2024",
+            "2024-13-01",
+            "2024-1-1",
+            "2024-01-+1",
+            "",
+            "hoy",
+        ] {
+            let filters = NationalFilters {
+                from_date: Some(invalid.to_owned()),
+                ..Default::default()
+            };
+            assert!(validate_national(&filters).is_err(), "accepted `{invalid}`");
+        }
+    }
+
+    #[test]
+    fn validate_national_reversed_date_range_is_rejected() {
+        // Arrange
+        let filters = NationalFilters {
+            from_date: Some("2024-02-01".to_owned()),
+            to_date: Some("2024-01-01".to_owned()),
+            ..Default::default()
+        };
+
+        // Act
+        let result = validate_national(&filters);
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("after --to-date")));
+    }
+
+    #[test]
+    fn validate_national_valid_filters_are_accepted() {
+        // Arrange
+        let filters = NationalFilters {
+            law_type: Some("decretos".to_owned()),
+            year: Some(2024),
+            from_date: Some("2024-01-01".to_owned()),
+            to_date: Some("2024-01-31".to_owned()),
+            ..Default::default()
+        };
+
+        // Act / Assert
+        assert!(validate_national(&filters).is_ok());
+    }
+
+    #[test]
+    fn cli_query_national_with_flags_parses_every_filter() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "national",
+            "--law-type",
+            "resoluciones",
+            "--law-number",
+            "5911",
+            "--year",
+            "2026",
+            "--agency",
+            "AGENCIA DE RECAUDACION Y CONTROL ADUANERO",
+            "--from-date",
+            "2026-01-01",
+            "--to-date",
+            "2026-12-31",
+            "--query",
+            "impuesto",
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Query { province: None, query: None, scope: Some(QueryScope::National(filters)) } })
+                if filters == NationalFilters {
+                    law_type: Some("resoluciones".to_owned()),
+                    law_number: Some(5911),
+                    year: Some(2026),
+                    agency: Some("AGENCIA DE RECAUDACION Y CONTROL ADUANERO".to_owned()),
+                    from_date: Some("2026-01-01".to_owned()),
+                    to_date: Some("2026-12-31".to_owned()),
+                    query: Some("impuesto".to_owned()),
+                }
+        ));
+    }
+
+    #[test]
+    fn cli_query_national_unknown_law_type_fails() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "national",
+            "--law-type",
+            "ordenanzas",
+        ]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn cli_query_national_non_numeric_law_number_fails() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "national",
+            "--law-number",
+            "12a",
+        ]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn cli_query_province_flags_with_national_subcommand_fail() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "--province",
+            "Córdoba",
+            "national",
+            "--query",
+            "impuesto",
+        ]);
 
         // Assert
         assert!(cli.is_err());
