@@ -1,4 +1,4 @@
-# normativa-scraper
+# argentina-normativa-cli
 
 Command-line scraper for the provincial laws published on
 [argentina.gob.ar/normativa](https://www.argentina.gob.ar/normativa). It drives a headless Chrome to:
@@ -18,7 +18,7 @@ Command-line scraper for the provincial laws published on
 cargo build --release
 ```
 
-The binary is `target/release/normativa-scraper`. The examples below assume it is on your `PATH`.
+The binary is `target/release/argentina-normativa-cli`. The examples below assume it is on your `PATH`.
 
 ## Usage
 
@@ -27,7 +27,7 @@ The binary is `target/release/normativa-scraper`. The examples below assume it i
 Prints the provinces of the "Elegí una provincia" select as a JSON array. Use these exact names with `query`.
 
 ```bash
-normativa-scraper list
+argentina-normativa-cli list
 ```
 
 ### `query`
@@ -35,7 +35,7 @@ normativa-scraper list
 Searches the laws of one province and prints one JSON object per line.
 
 ```bash
-normativa-scraper query --province "Córdoba" --query "impuesto tasa"
+argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"
 ```
 
 | Option | Description |
@@ -66,7 +66,7 @@ Opens a law page, prints its province, title and status as JSON, then follows th
 law text as a PDF.
 
 ```bash
-normativa-scraper fetch --jurisdiction provincial --law ley-14709-123456789-0abc-defg-907-4100bvorpyel
+argentina-normativa-cli fetch --jurisdiction provincial --law ley-14709-123456789-0abc-defg-907-4100bvorpyel
 ```
 
 | Option | Description |
@@ -97,7 +97,7 @@ Only data goes to **stdout** (JSON or JSON lines), so it can be piped, for examp
 control them with `RUST_LOG` (default `info,chromiumoxide=error`).
 
 ```bash
-normativa-scraper query --province "Córdoba" --query "impuesto" | jq -r '.url'
+argentina-normativa-cli query --province "Córdoba" --query "impuesto" | jq -r '.url'
 ```
 
 ## Good to know
