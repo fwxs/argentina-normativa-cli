@@ -19,6 +19,7 @@ cargo build --release                  # binary: target/release/argentina-normat
 
 argentina-normativa-cli list                                         # provinces as a JSON array
 argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"   # JSON lines
+argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
 argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
 ```
 
@@ -49,6 +50,12 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - Searching works with plain GETs: `/normativa?provincia=<name>&jurisdiccion=provincial&tipo_norma=Ley&texto=<kw>&limit=50&offset=<page>`.
   `offset` is a **1-based page number**, not a row offset. Cloudflare Turnstile only guards the POST form submit, so the
   scraper navigates by URL instead of filling the form.
+- National search (`query national`) is also plain GET: `/normativa?jurisdiccion=nacional&tipo_norma=&numero=&anio=&dependencia=&publicacion_desde=&publicacion_hasta=&texto=&s=1&page=<n>`.
+  Send **every** param, even empty. `page` is **0-based**, 50 rows per page, no `limit`/`offset`. Dates must be ISO
+  `YYYY-MM-DD` (`dd-mm-aaaa`, the form placeholder, returns nothing). `tipo_norma` is a slug (`leyes`, `decretos`, ...;
+  see `LAW_TYPES`). `leyes` + `anio` returns a page with no results block, so `validate_national` rejects it.
+  Counter is `div.infoleg-search-results-count` ("N normas encontradas en P páginas", pages only as text); rows link to
+  `/normativa/nacional/norma-<id>` and the issuing agency is the `p.small` in the Normativa cell.
 - `tipo_norma` is mandatory (empty/`todas`/`*` return nothing); provincial search is fixed to `Ley`.
 - `texto` is AND-semantics across words. Province names are exact, accented strings from `list` (e.g. `Córdoba`).
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
