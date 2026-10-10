@@ -19,7 +19,7 @@ cargo build --release                  # binary: target/release/argentina-normat
 
 argentina-normativa-cli list                                         # provinces as a JSON array
 argentina-normativa-cli list national <agencies|law-type|years>      # values for `query national` flags, JSON array
-argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"   # JSON lines
+argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"   # provincial, JSON lines
 argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
 argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
 ```
@@ -38,7 +38,7 @@ Modules, one domain each; unit tests sit in a `#[cfg(test)]` module at the botto
 - `commands/{list,query,fetch}` one runner per subcommand
 
 Flow per subcommand: `lib::run` validates input **before** launching Chrome → `launch_browser` →
-`run_list | run_query | run_fetch` → close browser, then return the command's result.
+`run_list | run_query_provinces | run_query_national | run_fetch` → close browser, then return the command's result.
 Keep items `pub(crate)` unless `main.rs` needs them.
 
 Parsing is kept pure and separate from browsing: `fetch_html` (`page.goto` + `page.content()`) returns HTML, and

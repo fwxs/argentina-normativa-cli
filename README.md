@@ -42,7 +42,7 @@ The binary is `target/release/argentina-normativa-cli`. The examples below assum
 
 ### `list`
 
-Prints the provinces of the "Elegí una provincia" select as a JSON array. Use these exact names with `query`.
+Prints the provinces of the "Elegí una provincia" select as a JSON array. Use these exact names with `query provinces`.
 
 ```bash
 argentina-normativa-cli list
@@ -60,10 +60,14 @@ argentina-normativa-cli list national years      # --year: 2026 down to 1853
 
 ### `query`
 
-Searches the laws of one province and prints one JSON object per line.
+Searches laws and prints one JSON object per line. Pick what to search with a subcommand: `provinces` or `national`.
+
+#### `query provinces`
+
+Searches the laws of one province.
 
 ```bash
-argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"
+argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"
 ```
 
 | Option | Description |
@@ -149,7 +153,7 @@ Only data goes to **stdout** (JSON or JSON lines), so it can be piped, for examp
 control them with `RUST_LOG` (default `info,chromiumoxide=error`).
 
 ```bash
-argentina-normativa-cli query --province "Córdoba" --query "impuesto" | jq -r '.url'
+argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto" | jq -r '.url'
 ```
 
 ## Good to know
