@@ -57,6 +57,22 @@ pub(crate) fn validate_iso_date(flag: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Each given date must be a real ISO date, and the range must not be reversed.
+pub(crate) fn validate_date_range(from_date: Option<&str>, to_date: Option<&str>) -> Result<()> {
+    if let Some(from_date) = from_date {
+        validate_iso_date("--from-date", from_date)?;
+    }
+    if let Some(to_date) = to_date {
+        validate_iso_date("--to-date", to_date)?;
+    }
+    if let (Some(from_date), Some(to_date)) = (from_date, to_date)
+        && from_date > to_date
+    {
+        bail!("--from-date {from_date} is after --to-date {to_date}");
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_national(filters: &NationalFilters) -> Result<()> {
     if *filters == NationalFilters::default() {
         // An unfiltered search is every norm (~200 pages at one page per crawl delay).
@@ -66,18 +82,7 @@ pub(crate) fn validate_national(filters: &NationalFilters) -> Result<()> {
     if filters.law_type.as_deref() == Some("leyes") && filters.year.is_some() {
         bail!("--year finds no `leyes` on the site; use --from-date and --to-date instead");
     }
-    if let Some(from_date) = &filters.from_date {
-        validate_iso_date("--from-date", from_date)?;
-    }
-    if let Some(to_date) = &filters.to_date {
-        validate_iso_date("--to-date", to_date)?;
-    }
-    if let (Some(from_date), Some(to_date)) = (&filters.from_date, &filters.to_date)
-        && from_date > to_date
-    {
-        bail!("--from-date {from_date} is after --to-date {to_date}");
-    }
-    Ok(())
+    validate_date_range(filters.from_date.as_deref(), filters.to_date.as_deref())
 }
 
 #[cfg(test)]
