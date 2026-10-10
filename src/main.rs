@@ -346,7 +346,8 @@ fn norm_type_from_title(titulo: &str) -> String {
 
 fn parse_results(html: &str, provincia: Option<&str>) -> Result<ResultsPage> {
     let document = Html::parse_document(html);
-    let row_selector = selector("tbody tr")?;
+    // Provincial rows sit in `#normas`; national ones in the div right after the results counter.
+    let row_selector = selector("#normas tbody tr, .infoleg-search-results-count ~ div tbody tr")?;
     let link_selector = selector(r#"td[data-label="Normativa"] a"#)?;
     let agency_selector = selector(r#"td[data-label="Normativa"] p.small"#)?;
     let time_selector = selector("time[datetime]")?;
@@ -824,13 +825,50 @@ mod tests {
     }
 
     #[test]
-    fn parse_results_provincial_row_omits_organismo_from_json() -> Result<()> {
+    fn parse_results_provincial_fixture_rows_are_all_provincial_without_organismo() -> Result<()> {
         // Act
         let results = parse_results(RESULTS_FIXTURE, Some("Buenos Aires"))?;
-        let json = serde_json::to_string(&results.rows[0])?;
 
         // Assert
-        assert!(!json.contains("organismo"));
+        assert_eq!(results.rows.len(), 50);
+        for row in &results.rows {
+            assert_eq!(row.jurisdiccion, Jurisdiccion::Provincial);
+            assert_eq!(row.tipo_norma, "Ley");
+            assert!(!serde_json::to_string(row)?.contains("organismo"));
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn parse_results_ignores_rows_of_unrelated_tables() -> Result<()> {
+        // Arrange
+        let html = r#"<table><tbody><tr>
+            <td data-label="Normativa"><a href="/normativa/nacional/norma-1">Ley 1</a></td>
+            </tr></tbody></table>"#;
+
+        // Act
+        let results = parse_results(html, None)?;
+
+        // Assert
+        assert_eq!(results.rows, vec![]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_results_national_single_result_page_counts_one_page() -> Result<()> {
+        // Arrange
+        let html = r#"<div class="infoleg-search-results-count m-b-2">
+            <span class="fw-semibold">1</span> norma encontrada en 1 página</div>
+            <div class=""><table><tbody><tr>
+            <td data-label="Normativa"><a href="/normativa/nacional/norma-1">Ley 1</a></td>
+            </tr></tbody></table></div>"#;
+
+        // Act
+        let results = parse_results(html, None)?;
+
+        // Assert
+        assert_eq!(results.total_pages, 1);
+        assert_eq!(results.rows.len(), 1);
         Ok(())
     }
 
