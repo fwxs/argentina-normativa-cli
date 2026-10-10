@@ -29,9 +29,17 @@ Live runs hit the real site and are slow by design (see crawl delay below).
 
 ## Architecture
 
-Everything lives in `src/main.rs` (CLI, parsers, browser driving, unit tests in one file). Flow per subcommand:
-`main` parses args and validates input **before** launching Chrome → `launch_browser` → `run_list | run_query |
-run_fetch` → close browser, then return the command's result.
+The crate is a library (`src/lib.rs`) plus a thin binary (`src/main.rs`: parse args, init `tracing`, call `run`).
+Modules, one domain each; unit tests sit in a `#[cfg(test)]` module at the bottom of the file they cover:
+
+- `cli` clap types (`Cli`, `Command`, `NationalFilters`, ...) · `model` shared types (`Jurisdiccion`, `Normativa`, ...)
+- `site` constants (`LAW_TYPES`, `CRAWL_DELAY`, ...) and url builders · `validate` input checks
+- `parse/{mod,results,law,national}` pure HTML parsers · `browser` Chrome launch/navigation · `output` stdout writers
+- `commands/{list,query,fetch}` one runner per subcommand
+
+Flow per subcommand: `lib::run` validates input **before** launching Chrome → `launch_browser` →
+`run_list | run_query | run_fetch` → close browser, then return the command's result.
+Keep items `pub(crate)` unless `main.rs` needs them.
 
 Parsing is kept pure and separate from browsing: `fetch_html` (`page.goto` + `page.content()`) returns HTML, and
 `parse_options` / `parse_results` / `parse_law_page` turn it into data with the `scraper` crate. This is what makes
