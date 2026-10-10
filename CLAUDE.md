@@ -56,6 +56,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   see `LAW_TYPES`). `leyes` + `anio` returns a page with no results block, so `validate_national` rejects it.
   Counter is `div.infoleg-search-results-count` ("N normas encontradas en P páginas", pages only as text); rows link to
   `/normativa/nacional/norma-<id>` and the issuing agency is the `p.small` in the Normativa cell.
+  `query national` stops after `--max-pages` (default `DEFAULT_MAX_PAGES` = 20) and warns when truncated; provincial is uncapped.
 - `tipo_norma` is mandatory (empty/`todas`/`*` return nothing); provincial search is fixed to `Ley`.
 - `texto` is AND-semantics across words. Province names are exact, accented strings from `list` (e.g. `Córdoba`).
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
