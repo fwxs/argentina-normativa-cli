@@ -18,6 +18,7 @@ cargo test parse_law_page              # single test (substring match on the tes
 cargo build --release                  # binary: target/release/argentina-normativa-cli
 
 argentina-normativa-cli list                                         # provinces as a JSON array
+argentina-normativa-cli list national <agencies|law-type|years>      # values for `query national` flags, JSON array
 argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"   # JSON lines
 argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
 argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
@@ -56,6 +57,8 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   see `LAW_TYPES`). `leyes` + `anio` returns a page with no results block, so `validate_national` rejects it.
   Counter is `div.infoleg-search-results-count` ("N normas encontradas en P páginas", pages only as text); rows link to
   `/normativa/nacional/norma-<id>` and the issuing agency is the `p.small` in the Normativa cell.
+  The national page has two forms with a `dependencia` select (1690 agencies each); `list national` scopes to
+  `form#infoleg-normativa-search-form` to avoid duplicates. `list national law-type` prints `LAW_TYPES`, no Chrome.
   `query national` stops after `--max-pages` (default `DEFAULT_MAX_PAGES` = 20) and warns when truncated; provincial is uncapped.
 - `tipo_norma` is mandatory (empty/`todas`/`*` return nothing); provincial search is fixed to `Ley`.
 - `texto` is AND-semantics across words. Province names are exact, accented strings from `list` (e.g. `Córdoba`).
