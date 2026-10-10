@@ -53,6 +53,9 @@ const LAW_TYPES: &[&str] = &[
     "providencias",
     "recomendaciones",
 ];
+// Default for `query national --max-pages`: a lone broad filter (`--law-type decretos`) is thousands of
+// rows, and every page costs a crawl delay.
+const DEFAULT_MAX_PAGES: u32 = 20;
 // robots.txt asks for `Crawl-delay: 10`.
 const CRAWL_DELAY: Duration = Duration::from_secs(10);
 
@@ -104,7 +107,17 @@ enum Command {
 #[derive(Debug, Subcommand)]
 enum QueryScope {
     /// Search national norms with the filters of the site's national form.
-    National(NationalFilters),
+    National(NationalArgs),
+}
+
+/// Arguments of `query national`: the form filters plus a crawl cap.
+#[derive(Debug, Args, PartialEq)]
+struct NationalArgs {
+    #[command(flatten)]
+    filters: NationalFilters,
+    /// Stop after this many result pages (50 rows each, one crawl delay per page).
+    #[arg(long, default_value_t = DEFAULT_MAX_PAGES, value_parser = value_parser!(u32).range(1..))]
+    max_pages: u32,
 }
 
 /// clap parser for free-text filters: trims, and rejects empty values so they can't pass for a filter.
@@ -515,24 +528,39 @@ async fn run_list(page: &Page) -> Result<()> {
     .context("failed to write provinces to stdout")
 }
 
-/// Walks every results page of a search, printing each law as a JSON line; returns the row count.
-/// `url_for_page` takes a 0-based page index. The total page count comes from the first page.
+/// Pages to walk: all of them, unless the cap is lower.
+fn pages_to_fetch(total_pages: usize, max_pages: usize) -> usize {
+    total_pages.min(max_pages)
+}
+
+/// Walks the results pages of a search (at most `max_pages`), printing each law as a JSON line;
+/// returns the row count. `url_for_page` takes a 0-based page index. The total page count comes
+/// from the first page.
 async fn run_search(
     page: &Page,
     provincia: Option<&str>,
+    max_pages: usize,
     url_for_page: impl Fn(usize) -> Result<String>,
 ) -> Result<usize> {
     let mut page_index = 0;
-    let mut total_pages = 1;
+    let mut last_page = 1;
     let mut written = 0usize;
-    while page_index < total_pages {
+    while page_index < last_page {
         if page_index > 0 {
             tokio::time::sleep(CRAWL_DELAY).await;
         }
         let html = fetch_html(page, &url_for_page(page_index)?).await?;
         let results = parse_results(&html, provincia)?;
+        let total_pages = results.total_pages;
         if page_index == 0 {
-            total_pages = results.total_pages;
+            last_page = pages_to_fetch(total_pages, max_pages);
+            if last_page < total_pages {
+                tracing::warn!(
+                    fetching = last_page,
+                    total_pages,
+                    "result truncated; raise --max-pages to fetch more"
+                );
+            }
         }
         for normativa in &results.rows {
             writeln!(std::io::stdout(), "{}", serde_json::to_string(normativa)?)
@@ -547,7 +575,7 @@ async fn run_search(
 
 async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
     // The provincial site's `offset` is a 1-based page number.
-    let written = run_search(page, Some(provincia), |page_index| {
+    let written = run_search(page, Some(provincia), usize::MAX, |page_index| {
         search_url(provincia, query, page_index + 1)
     })
     .await?;
@@ -561,9 +589,10 @@ async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
     Ok(())
 }
 
-async fn run_query_national(page: &Page, filters: &NationalFilters) -> Result<()> {
-    let written = run_search(page, None, |page_index| {
-        national_search_url(filters, page_index)
+async fn run_query_national(page: &Page, args: &NationalArgs) -> Result<()> {
+    let max_pages = usize::try_from(args.max_pages).unwrap_or(usize::MAX);
+    let written = run_search(page, None, max_pages, |page_index| {
+        national_search_url(&args.filters, page_index)
     })
     .await?;
     if written == 0 {
@@ -632,9 +661,9 @@ async fn main() -> Result<()> {
             jurisdiction, law, ..
         } => validate_fetch(*jurisdiction, law)?,
         Command::Query {
-            scope: Some(QueryScope::National(filters)),
+            scope: Some(QueryScope::National(args)),
             ..
-        } => validate_national(filters)?,
+        } => validate_national(&args.filters)?,
         Command::List | Command::Query { .. } => {}
     }
 
@@ -651,9 +680,9 @@ async fn main() -> Result<()> {
     let outcome = match &cli.command {
         Command::List => run_list(&page).await,
         Command::Query {
-            scope: Some(QueryScope::National(filters)),
+            scope: Some(QueryScope::National(args)),
             ..
-        } => run_query_national(&page, filters).await,
+        } => run_query_national(&page, args).await,
         Command::Query {
             province: Some(province),
             query: Some(query),
@@ -1074,8 +1103,8 @@ mod tests {
         // Assert
         assert!(matches!(
             cli,
-            Ok(Cli { command: Command::Query { province: None, query: None, scope: Some(QueryScope::National(filters)) } })
-                if filters == NationalFilters {
+            Ok(Cli { command: Command::Query { province: None, query: None, scope: Some(QueryScope::National(args)) } })
+                if args.max_pages == DEFAULT_MAX_PAGES && args.filters == NationalFilters {
                     law_type: Some("resoluciones".to_owned()),
                     law_number: Some(5911),
                     year: Some(2026),
@@ -1120,10 +1149,57 @@ mod tests {
         // Assert
         assert!(matches!(
             cli,
-            Ok(Cli { command: Command::Query { scope: Some(QueryScope::National(filters)), .. } })
-                if filters.query.as_deref() == Some("impuesto")
-                    && filters.agency.as_deref() == Some("MINISTERIO DE ECONOMIA")
+            Ok(Cli { command: Command::Query { scope: Some(QueryScope::National(args)), .. } })
+                if args.filters.query.as_deref() == Some("impuesto")
+                    && args.filters.agency.as_deref() == Some("MINISTERIO DE ECONOMIA")
         ));
+    }
+
+    #[test]
+    fn cli_query_national_max_pages_flag_overrides_default() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "national",
+            "--query",
+            "impuesto",
+            "--max-pages",
+            "3",
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Query { scope: Some(QueryScope::National(args)), .. } })
+                if args.max_pages == 3
+        ));
+    }
+
+    #[test]
+    fn cli_query_national_zero_max_pages_fails() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "national",
+            "--query",
+            "impuesto",
+            "--max-pages",
+            "0",
+        ]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn pages_to_fetch_caps_total_pages() {
+        // Act / Assert
+        assert_eq!(pages_to_fetch(212, 20), 20);
+        assert_eq!(pages_to_fetch(3, 20), 3);
+        assert_eq!(pages_to_fetch(0, 20), 0);
+        assert_eq!(pages_to_fetch(5, usize::MAX), 5);
     }
 
     #[test]
