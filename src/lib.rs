@@ -3,28 +3,27 @@
 //! `query national`, national norms) as JSON lines;
 //! `fetch` prints one law's details as JSON and saves its text as a PDF.
 
+mod browser;
 mod cli;
 mod model;
+mod output;
 mod parse;
 mod site;
 mod validate;
 
 use std::io::Write;
 use std::path::{Path, PathBuf};
-use std::time::Duration;
 
-use anyhow::{Context, Result, anyhow, bail};
-use chromiumoxide::browser::{Browser, BrowserConfig};
+use anyhow::{Context, Result, bail};
 use chromiumoxide::cdp::browser_protocol::page::PrintToPdfParams;
 use chromiumoxide::page::Page;
-use futures::StreamExt;
-use serde::Serialize;
-use tokio::task::JoinHandle;
 
+use crate::browser::{fetch_html, launch_browser, wait_for_url_suffix};
 pub use crate::cli::{
     Cli, Command, ListScope, NationalArgs, NationalFilters, NationalList, QueryScope,
 };
 use crate::model::Jurisdiccion;
+use crate::output::print_json_array;
 use crate::parse::{parse_agencies, parse_law_page, parse_options, parse_results, parse_years};
 use crate::site::{
     CRAWL_DELAY, LAW_TYPES, SEARCH_PATH, SITE_ORIGIN, law_url, national_search_url, search_url,
@@ -38,40 +37,6 @@ const VIEW_LAW_PATH_SUFFIX: &str = "/actualizacion";
 /// Where the law's PDF goes: `--output` when given, otherwise `<ley>.pdf` in the current directory.
 fn pdf_path(ley: &str, output: Option<&Path>) -> PathBuf {
     output.map_or_else(|| PathBuf::from(format!("{ley}.pdf")), Path::to_path_buf)
-}
-
-async fn fetch_html(page: &Page, url: &str) -> Result<String> {
-    page.goto(url)
-        .await
-        .with_context(|| format!("failed to open {url}"))?;
-    page.content()
-        .await
-        .with_context(|| format!("failed to read content of {url}"))
-}
-
-async fn launch_browser() -> Result<(Browser, JoinHandle<()>, Page)> {
-    let browser_config = BrowserConfig::builder()
-        .build()
-        .map_err(|error| anyhow!("invalid browser config: {error}"))?;
-    let (browser, mut handler) = Browser::launch(browser_config)
-        .await
-        .context("failed to launch headless Chrome")?;
-    // Chrome emits CDP messages chromiumoxide can't decode; those errors are not fatal, keep polling.
-    let handler_task = tokio::spawn(async move { while handler.next().await.is_some() {} });
-    let page = browser
-        .new_page("about:blank")
-        .await
-        .context("failed to open browser page")?;
-    Ok((browser, handler_task, page))
-}
-
-fn print_json_array<T: Serialize>(items: &[T], what: &str) -> Result<()> {
-    writeln!(
-        std::io::stdout(),
-        "{}",
-        serde_json::to_string_pretty(items)?
-    )
-    .with_context(|| format!("failed to write {what} to stdout"))
 }
 
 async fn run_list(page: &Page) -> Result<()> {
@@ -185,20 +150,6 @@ async fn run_query_national(page: &Page, args: &NationalArgs) -> Result<()> {
         tracing::warn!("no results; check the filters (agency names must match exactly)");
     }
     Ok(())
-}
-
-// The click only starts the navigation, so poll until the page url shows it happened.
-async fn wait_for_url_suffix(page: &Page, suffix: &str) -> Result<()> {
-    const POLL_INTERVAL: Duration = Duration::from_millis(250);
-    const MAX_POLLS: u32 = 60;
-    for _ in 0..MAX_POLLS {
-        let current = page.url().await.context("failed to read page url")?;
-        if current.as_deref().is_some_and(|url| url.ends_with(suffix)) {
-            return Ok(());
-        }
-        tokio::time::sleep(POLL_INTERVAL).await;
-    }
-    bail!("page url did not end with `{suffix}` after {MAX_POLLS} polls")
 }
 
 async fn run_fetch(
