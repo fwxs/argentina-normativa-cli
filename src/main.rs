@@ -138,8 +138,8 @@ struct NationalFilters {
     /// "Número": norm number, digits only.
     #[arg(long, value_parser = value_parser!(u64))]
     law_number: Option<u64>,
-    /// "Año": four-digit year.
-    #[arg(long, value_parser = value_parser!(u16).range(1853..=2100))]
+    /// "Año": four-digit year (the site's year select starts at 1853).
+    #[arg(long, value_parser = value_parser!(u16).range(1853..))]
     year: Option<u16>,
     /// "Organismo o dependencia": exact (upper-case) agency name as listed by the site.
     #[arg(long, value_parser = non_empty_trimmed)]
@@ -221,16 +221,34 @@ fn validate_fetch(jurisdiccion: Jurisdiccion, ley: &str) -> Result<()> {
     }
 }
 
+/// `month` is 1..=12.
+fn days_in_month(year: u32, month: u32) -> u32 {
+    let is_leap_year =
+        year.is_multiple_of(4) && (!year.is_multiple_of(100) || year.is_multiple_of(400));
+    match month {
+        2 if is_leap_year => 29,
+        2 => 28,
+        4 | 6 | 9 | 11 => 30,
+        _ => 31,
+    }
+}
+
 /// The site only accepts ISO dates in the url (`dd-mm-aaaa`, the form's placeholder, finds nothing).
 fn validate_iso_date(flag: &str, value: &str) -> Result<()> {
     let parts: Vec<&str> = value.split('-').collect();
     let is_valid = value.chars().all(|c| c.is_ascii_digit() || c == '-')
         && match parts.as_slice() {
             [year, month, day] if year.len() == 4 && month.len() == 2 && day.len() == 2 => {
-                matches!(
-                    (month.parse::<u32>(), day.parse::<u32>()),
-                    (Ok(1..=12), Ok(1..=31))
-                )
+                match (
+                    year.parse::<u32>(),
+                    month.parse::<u32>(),
+                    day.parse::<u32>(),
+                ) {
+                    (Ok(year), Ok(month @ 1..=12), Ok(day)) => {
+                        (1..=days_in_month(year, month)).contains(&day)
+                    }
+                    _ => false,
+                }
             }
             _ => false,
         };
@@ -568,7 +586,12 @@ async fn run_search(
                 .context("failed to write normativa to stdout")?;
             written += 1;
         }
-        tracing::info!(page_number = page_index + 1, total_pages, "page fetched");
+        tracing::info!(
+            provincia,
+            page_number = page_index + 1,
+            total_pages,
+            "page fetched"
+        );
         page_index += 1;
     }
     Ok(written)
@@ -665,6 +688,13 @@ async fn main() -> Result<()> {
             scope: Some(QueryScope::National(args)),
             ..
         } => validate_national(&args.filters)?,
+        Command::Query {
+            scope: None,
+            province,
+            query,
+        } if province.is_none() || query.is_none() => {
+            bail!("--province and --query are required")
+        }
         Command::List | Command::Query { .. } => {}
     }
 
@@ -689,7 +719,8 @@ async fn main() -> Result<()> {
             query: Some(query),
             ..
         } => run_query(&page, province, query).await,
-        // clap requires both flags unless a subcommand is given.
+        // Unreachable: clap requires both flags unless a subcommand is given, and `main` checks
+        // before launching Chrome.
         Command::Query { .. } => bail!("--province and --query are required"),
         Command::Fetch {
             jurisdiction,
@@ -1081,6 +1112,37 @@ mod tests {
                 ..Default::default()
             };
             assert!(validate_national(&filters).is_err(), "accepted `{invalid}`");
+        }
+    }
+
+    #[test]
+    fn validate_national_impossible_calendar_dates_are_rejected() {
+        // Act / Assert
+        for invalid in [
+            "2024-02-30",
+            "2023-02-29",
+            "2024-04-31",
+            "1900-02-29",
+            "2024-00-10",
+            "2024-06-00",
+        ] {
+            let filters = NationalFilters {
+                to_date: Some(invalid.to_owned()),
+                ..Default::default()
+            };
+            assert!(validate_national(&filters).is_err(), "accepted `{invalid}`");
+        }
+    }
+
+    #[test]
+    fn validate_national_leap_days_are_accepted() {
+        // Act / Assert
+        for valid in ["2024-02-29", "2000-02-29", "2023-02-28", "2024-12-31"] {
+            let filters = NationalFilters {
+                to_date: Some(valid.to_owned()),
+                ..Default::default()
+            };
+            assert!(validate_national(&filters).is_ok(), "rejected `{valid}`");
         }
     }
 
