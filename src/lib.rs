@@ -1,6 +1,6 @@
 //! Scrapes "Normativas" from argentina.gob.ar/normativa, driving headless Chrome.
-//! `list` prints the provinces of the search form; `query` prints matching provincial laws (or, with
-//! `query national`, national norms) as JSON lines;
+//! `list` prints the provinces of the search form; `query provinces` prints matching provincial laws and
+//! `query national` national norms, as JSON lines;
 //! `fetch` prints one law's details as JSON and saves its text as a PDF.
 
 mod browser;
@@ -12,16 +12,18 @@ mod parse;
 mod site;
 mod validate;
 
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result};
 
 use crate::browser::launch_browser;
 pub use crate::cli::{
-    Cli, Command, ListScope, NationalArgs, NationalFilters, NationalList, QueryScope,
+    Cli, Command, ListScope, NationalArgs, NationalFilters, NationalList, ProvinceArgs, QueryScope,
 };
-use crate::commands::{run_fetch, run_list, run_list_national, run_query, run_query_national};
+use crate::commands::{
+    run_fetch, run_list, run_list_national, run_query_national, run_query_provinces,
+};
 use crate::output::print_json_array;
 use crate::site::LAW_TYPES;
-use crate::validate::{validate_fetch, validate_national};
+use crate::validate::{validate_fetch, validate_national, validate_provinces};
 
 /// Runs one parsed command: validates input, drives Chrome and prints the result to stdout.
 ///
@@ -32,16 +34,8 @@ pub async fn run(cli: Cli) -> Result<()> {
             jurisdiction, law, ..
         } => validate_fetch(*jurisdiction, law)?,
         Command::Query {
-            scope: Some(QueryScope::National(args)),
-            ..
+            scope: QueryScope::National(args),
         } => validate_national(&args.filters)?,
-        Command::Query {
-            scope: None,
-            province,
-            query,
-        } if province.is_none() || query.is_none() => {
-            bail!("--province and --query are required")
-        }
         // Slugs are a local constant: answer without launching Chrome.
         Command::List {
             scope:
@@ -49,7 +43,10 @@ pub async fn run(cli: Cli) -> Result<()> {
                     what: NationalList::LawType,
                 }),
         } => return print_json_array(LAW_TYPES, "law types"),
-        Command::List { .. } | Command::Query { .. } => {}
+        Command::Query {
+            scope: QueryScope::Provinces(args),
+        } => validate_provinces(args)?,
+        Command::List { .. } => {}
     }
 
     let (mut browser, handler_task, page) = launch_browser().await?;
@@ -59,17 +56,11 @@ pub async fn run(cli: Cli) -> Result<()> {
             scope: Some(ListScope::National { what }),
         } => run_list_national(&page, *what).await,
         Command::Query {
-            scope: Some(QueryScope::National(args)),
-            ..
-        } => run_query_national(&page, args).await,
+            scope: QueryScope::Provinces(args),
+        } => run_query_provinces(&page, args).await,
         Command::Query {
-            province: Some(province),
-            query: Some(query),
-            ..
-        } => run_query(&page, province, query).await,
-        // Unreachable: clap requires both flags unless a subcommand is given, and the check above
-        // runs before launching Chrome.
-        Command::Query { .. } => bail!("--province and --query are required"),
+            scope: QueryScope::National(args),
+        } => run_query_national(&page, args).await,
         Command::Fetch {
             jurisdiction,
             law,

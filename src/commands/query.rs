@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 use chromiumoxide::page::Page;
 
 use crate::browser::fetch_html;
-use crate::cli::NationalArgs;
+use crate::cli::{NationalArgs, ProvinceArgs};
 use crate::parse::parse_results;
 use crate::site::{CRAWL_DELAY, national_search_url, search_url};
 
@@ -60,17 +60,15 @@ async fn run_search(
     Ok(written)
 }
 
-pub(crate) async fn run_query(page: &Page, provincia: &str, query: &str) -> Result<()> {
-    // The provincial site's `offset` is a 1-based page number.
-    let written = run_search(page, Some(provincia), usize::MAX, |page_index| {
-        search_url(provincia, query, page_index + 1)
+pub(crate) async fn run_query_provinces(page: &Page, args: &ProvinceArgs) -> Result<()> {
+    let written = run_search(page, Some(&args.province), usize::MAX, |page_index| {
+        search_url(args, page_index + 1)
     })
     .await?;
     if written == 0 {
         tracing::warn!(
-            provincia,
-            query,
-            "no results; check the province name with `list`"
+            provincia = args.province.as_str(),
+            "no results; check the province name with `list` and the filters"
         );
     }
     Ok(())

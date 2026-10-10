@@ -19,7 +19,7 @@ cargo build --release                  # binary: target/release/argentina-normat
 
 argentina-normativa-cli list                                         # provinces as a JSON array
 argentina-normativa-cli list national <agencies|law-type|years>      # values for `query national` flags, JSON array
-argentina-normativa-cli query --province "Córdoba" --query "impuesto tasa"   # JSON lines
+argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"   # provincial, JSON lines
 argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
 argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
 ```
@@ -38,7 +38,7 @@ Modules, one domain each; unit tests sit in a `#[cfg(test)]` module at the botto
 - `commands/{list,query,fetch}` one runner per subcommand
 
 Flow per subcommand: `lib::run` validates input **before** launching Chrome → `launch_browser` →
-`run_list | run_query | run_fetch` → close browser, then return the command's result.
+`run_list | run_query_provinces | run_query_national | run_fetch` → close browser, then return the command's result.
 Keep items `pub(crate)` unless `main.rs` needs them.
 
 Parsing is kept pure and separate from browsing: `fetch_html` (`page.goto` + `page.content()`) returns HTML, and
@@ -59,6 +59,10 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - Searching works with plain GETs: `/normativa?provincia=<name>&jurisdiccion=provincial&tipo_norma=Ley&texto=<kw>&limit=50&offset=<page>`.
   `offset` is a **1-based page number**, not a row offset. Cloudflare Turnstile only guards the POST form submit, so the
   scraper navigates by URL instead of filling the form.
+  Optional filters are added only when set, with the **provincial** form's names (verified live 2026-10-10, they differ
+  from national): year is `sancion` (`anio` is silently ignored), `numero`, and flat ISO `publicacion_desde` /
+  `publicacion_hasta` (the form's `publicacion_desde[date]` returns no rows, `dd-mm-yyyy` filters nothing); `texto`
+  may be omitted. `validate_provinces` needs at least one filter: a bare province is thousands of rows (Buenos Aires: 88 pages).
 - National search (`query national`) is also plain GET: `/normativa?jurisdiccion=nacional&tipo_norma=&numero=&anio=&dependencia=&publicacion_desde=&publicacion_hasta=&texto=&s=1&page=<n>`.
   Send **every** param, even empty. `page` is **0-based**, 50 rows per page, no `limit`/`offset`. Dates must be ISO
   `YYYY-MM-DD` (`dd-mm-aaaa`, the form placeholder, returns nothing). `tipo_norma` is a slug (`leyes`, `decretos`, ...;

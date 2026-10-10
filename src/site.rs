@@ -5,8 +5,8 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use url::Url;
 
-use crate::NationalFilters;
 use crate::model::Jurisdiccion;
+use crate::{NationalFilters, ProvinceArgs};
 
 pub(crate) const SITE_ORIGIN: &str = "https://www.argentina.gob.ar";
 pub(crate) const SEARCH_PATH: &str = "/normativa";
@@ -70,21 +70,36 @@ pub(crate) fn law_url(jurisdiccion: Jurisdiccion, ley: &str) -> String {
     )
 }
 
-pub(crate) fn search_url(provincia: &str, query: &str, page_number: usize) -> Result<String> {
+/// Provincial search url. Only the filters that are set are sent, and `offset` is a 1-based page number.
+///
+/// The provincial form differs from the national one: its year select is `sancion` (`anio` is silently
+/// ignored) and the dates are flat ISO `publicacion_desde`/`publicacion_hasta` (the form's own
+/// `publicacion_desde[date]` and `dd-mm-yyyy` values filter nothing).
+pub(crate) fn search_url(args: &ProvinceArgs, page_number: usize) -> Result<String> {
+    let law_number = args.law_number.map(|number| number.to_string());
+    let year = args.year.map(|year| year.to_string());
     let page_number = page_number.to_string();
-    let url = Url::parse_with_params(
-        &format!("{SITE_ORIGIN}{SEARCH_PATH}"),
-        [
-            ("provincia", provincia),
-            ("jurisdiccion", "provincial"),
-            ("tipo_norma", TIPO_NORMA),
-            ("texto", query),
-            ("limit", PAGE_SIZE),
-            // The site's `offset` is a 1-based page number.
-            ("offset", page_number.as_str()),
-        ],
-    )
-    .context("failed to build search url")?;
+    let mut params = vec![
+        ("provincia", args.province.as_str()),
+        ("jurisdiccion", "provincial"),
+        ("tipo_norma", TIPO_NORMA),
+    ];
+    let filters = [
+        ("texto", args.query.as_deref()),
+        ("numero", law_number.as_deref()),
+        ("sancion", year.as_deref()),
+        ("publicacion_desde", args.from_date.as_deref()),
+        ("publicacion_hasta", args.to_date.as_deref()),
+    ];
+    params.extend(
+        filters
+            .into_iter()
+            .filter_map(|(name, value)| value.map(|value| (name, value))),
+    );
+    params.push(("limit", PAGE_SIZE));
+    params.push(("offset", page_number.as_str()));
+    let url = Url::parse_with_params(&format!("{SITE_ORIGIN}{SEARCH_PATH}"), params)
+        .context("failed to build search url")?;
     Ok(url.into())
 }
 
@@ -166,16 +181,78 @@ mod tests {
         assert_eq!(parse_law_href("/otra/provincial/ley-1"), None);
     }
 
+    fn province_args(province: &str) -> ProvinceArgs {
+        ProvinceArgs {
+            province: province.to_owned(),
+            law_number: None,
+            year: None,
+            from_date: None,
+            to_date: None,
+            query: None,
+        }
+    }
+
     #[test]
     fn search_url_accented_province_is_percent_encoded() -> Result<()> {
+        // Arrange
+        let args = ProvinceArgs {
+            query: Some("impuesto tasa".to_owned()),
+            ..province_args("Río Negro")
+        };
+
         // Act
-        let url = search_url("Río Negro", "impuesto tasa", 2)?;
+        let url = search_url(&args, 2)?;
 
         // Assert
         assert_eq!(
             url,
             "https://www.argentina.gob.ar/normativa?provincia=R%C3%ADo+Negro&jurisdiccion=provincial\
              &tipo_norma=Ley&texto=impuesto+tasa&limit=50&offset=2"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn search_url_full_filters_use_the_provincial_form_param_names() -> Result<()> {
+        // Arrange
+        let args = ProvinceArgs {
+            law_number: Some(14709),
+            year: Some(2015),
+            from_date: Some("2015-01-01".to_owned()),
+            to_date: Some("2015-12-31".to_owned()),
+            query: Some("impuesto".to_owned()),
+            ..province_args("Buenos Aires")
+        };
+
+        // Act
+        let url = search_url(&args, 1)?;
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://www.argentina.gob.ar/normativa?provincia=Buenos+Aires&jurisdiccion=provincial\
+             &tipo_norma=Ley&texto=impuesto&numero=14709&sancion=2015\
+             &publicacion_desde=2015-01-01&publicacion_hasta=2015-12-31&limit=50&offset=1"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn search_url_without_query_omits_texto() -> Result<()> {
+        // Arrange
+        let args = ProvinceArgs {
+            year: Some(2020),
+            ..province_args("Buenos Aires")
+        };
+
+        // Act
+        let url = search_url(&args, 1)?;
+
+        // Assert
+        assert_eq!(
+            url,
+            "https://www.argentina.gob.ar/normativa?provincia=Buenos+Aires&jurisdiccion=provincial\
+             &tipo_norma=Ley&sancion=2020&limit=50&offset=1"
         );
         Ok(())
     }

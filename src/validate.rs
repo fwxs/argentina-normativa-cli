@@ -2,7 +2,7 @@
 
 use anyhow::{Result, bail};
 
-use crate::cli::NationalFilters;
+use crate::cli::{NationalFilters, ProvinceArgs};
 use crate::model::Jurisdiccion;
 
 /// `--law` ends up in a url path and a file name, so only slug characters are allowed.
@@ -57,6 +57,35 @@ pub(crate) fn validate_iso_date(flag: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
+/// Each given date must be a real ISO date, and the range must not be reversed.
+pub(crate) fn validate_date_range(from_date: Option<&str>, to_date: Option<&str>) -> Result<()> {
+    if let Some(from_date) = from_date {
+        validate_iso_date("--from-date", from_date)?;
+    }
+    if let Some(to_date) = to_date {
+        validate_iso_date("--to-date", to_date)?;
+    }
+    if let (Some(from_date), Some(to_date)) = (from_date, to_date)
+        && from_date > to_date
+    {
+        bail!("--from-date {from_date} is after --to-date {to_date}");
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_provinces(args: &ProvinceArgs) -> Result<()> {
+    if args.query.is_none()
+        && args.year.is_none()
+        && args.law_number.is_none()
+        && args.from_date.is_none()
+        && args.to_date.is_none()
+    {
+        // An unfiltered search is every law of the province (thousands, one crawl delay per page).
+        bail!("pass at least one filter, e.g. --query or --year");
+    }
+    validate_date_range(args.from_date.as_deref(), args.to_date.as_deref())
+}
+
 pub(crate) fn validate_national(filters: &NationalFilters) -> Result<()> {
     if *filters == NationalFilters::default() {
         // An unfiltered search is every norm (~200 pages at one page per crawl delay).
@@ -66,18 +95,7 @@ pub(crate) fn validate_national(filters: &NationalFilters) -> Result<()> {
     if filters.law_type.as_deref() == Some("leyes") && filters.year.is_some() {
         bail!("--year finds no `leyes` on the site; use --from-date and --to-date instead");
     }
-    if let Some(from_date) = &filters.from_date {
-        validate_iso_date("--from-date", from_date)?;
-    }
-    if let Some(to_date) = &filters.to_date {
-        validate_iso_date("--to-date", to_date)?;
-    }
-    if let (Some(from_date), Some(to_date)) = (&filters.from_date, &filters.to_date)
-        && from_date > to_date
-    {
-        bail!("--from-date {from_date} is after --to-date {to_date}");
-    }
-    Ok(())
+    validate_date_range(filters.from_date.as_deref(), filters.to_date.as_deref())
 }
 
 #[cfg(test)]
@@ -85,6 +103,86 @@ mod tests {
     use super::*;
 
     const LAW_SLUG: &str = "ley-14709-123456789-0abc-defg-907-4100bvorpyel";
+
+    fn province_args() -> ProvinceArgs {
+        ProvinceArgs {
+            province: "Buenos Aires".to_owned(),
+            law_number: None,
+            year: None,
+            from_date: None,
+            to_date: None,
+            query: None,
+        }
+    }
+
+    #[test]
+    fn validate_provinces_no_filters_is_rejected() {
+        // Act
+        let result = validate_provinces(&province_args());
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("at least one filter")));
+    }
+
+    #[test]
+    fn validate_provinces_any_single_filter_is_accepted() {
+        // Arrange
+        let single_filters = [
+            ProvinceArgs {
+                query: Some("impuesto".to_owned()),
+                ..province_args()
+            },
+            ProvinceArgs {
+                year: Some(2020),
+                ..province_args()
+            },
+            ProvinceArgs {
+                law_number: Some(14709),
+                ..province_args()
+            },
+            ProvinceArgs {
+                from_date: Some("2020-01-01".to_owned()),
+                ..province_args()
+            },
+            ProvinceArgs {
+                to_date: Some("2020-12-31".to_owned()),
+                ..province_args()
+            },
+        ];
+
+        // Act / Assert
+        for args in &single_filters {
+            assert!(validate_provinces(args).is_ok(), "rejected {args:?}");
+        }
+    }
+
+    #[test]
+    fn validate_provinces_bad_or_impossible_dates_are_rejected() {
+        // Act / Assert
+        for invalid in ["01-01-2020", "2020-13-01", "2023-02-29", "hoy"] {
+            let args = ProvinceArgs {
+                from_date: Some(invalid.to_owned()),
+                ..province_args()
+            };
+            assert!(validate_provinces(&args).is_err(), "accepted `{invalid}`");
+        }
+    }
+
+    #[test]
+    fn validate_provinces_reversed_date_range_is_rejected() {
+        // Arrange
+        let args = ProvinceArgs {
+            from_date: Some("2020-02-01".to_owned()),
+            to_date: Some("2020-01-01".to_owned()),
+            ..province_args()
+        };
+
+        // Act
+        let result = validate_provinces(&args);
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("after --to-date")));
+    }
 
     #[test]
     fn validate_national_no_filters_is_rejected() {
