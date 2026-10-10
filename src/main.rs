@@ -77,7 +77,10 @@ struct Cli {
 #[derive(Debug, Subcommand)]
 enum Command {
     /// Print the provinces of the "Elegí una provincia" select box as a JSON array.
-    List,
+    List {
+        #[command(subcommand)]
+        scope: Option<ListScope>,
+    },
     /// Search the laws of one province (or, with `national`, national norms) as JSON lines on stdout.
     #[command(args_conflicts_with_subcommands = true, subcommand_negates_reqs = true)]
     Query {
@@ -102,6 +105,25 @@ enum Command {
         #[arg(long, value_name = "FILE_PATH")]
         output: Option<PathBuf>,
     },
+}
+
+#[derive(Debug, Subcommand)]
+enum ListScope {
+    /// Print the values the national search form accepts, as a JSON array.
+    National {
+        #[command(subcommand)]
+        what: NationalList,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Subcommand)]
+enum NationalList {
+    /// "Organismo o dependencia" names, for `query national --agency`.
+    Agencies,
+    /// "Tipo de norma" slugs, for `query national --law-type`.
+    LawType,
+    /// "Año" values (newest first), for `query national --year`.
+    Years,
 }
 
 #[derive(Debug, Subcommand)]
@@ -141,7 +163,7 @@ struct NationalFilters {
     /// "Año": four-digit year (the site's year select starts at 1853).
     #[arg(long, value_parser = value_parser!(u16).range(1853..))]
     year: Option<u16>,
-    /// "Organismo o dependencia": exact (upper-case) agency name as listed by the site.
+    /// "Organismo o dependencia": exact (upper-case) agency name, see `list national agencies`.
     #[arg(long, value_parser = non_empty_trimmed)]
     agency: Option<String>,
     /// "Publicación desde": YYYY-MM-DD.
@@ -532,19 +554,68 @@ async fn launch_browser() -> Result<(Browser, JoinHandle<()>, Page)> {
     Ok((browser, handler_task, page))
 }
 
+fn print_json_array<T: Serialize>(items: &[T], what: &str) -> Result<()> {
+    writeln!(
+        std::io::stdout(),
+        "{}",
+        serde_json::to_string_pretty(items)?
+    )
+    .with_context(|| format!("failed to write {what} to stdout"))
+}
+
 async fn run_list(page: &Page) -> Result<()> {
     let html = fetch_html(
         page,
         &format!("{SITE_ORIGIN}{SEARCH_PATH}?jurisdiccion=provincial"),
     )
     .await?;
-    let provinces = parse_options(&html, "select[name=provincia]")?;
-    writeln!(
-        std::io::stdout(),
-        "{}",
-        serde_json::to_string_pretty(&provinces)?
+    print_json_array(
+        &parse_options(&html, "select[name=provincia]")?,
+        "provinces",
     )
-    .context("failed to write provinces to stdout")
+}
+
+// The national page repeats some selects in a second form; only the main search form counts.
+const NATIONAL_FORM_SELECTOR: &str = "form#infoleg-normativa-search-form";
+
+fn parse_agencies(html: &str) -> Result<Vec<String>> {
+    parse_options(
+        html,
+        &format!("{NATIONAL_FORM_SELECTOR} select[name=dependencia]"),
+    )
+}
+
+fn parse_years(html: &str) -> Result<Vec<u16>> {
+    parse_options(html, &format!("{NATIONAL_FORM_SELECTOR} select[name=anio]"))?
+        .iter()
+        .map(|year| {
+            year.parse()
+                .with_context(|| format!("year option `{year}` is not a number"))
+        })
+        .collect()
+}
+
+async fn fetch_national_form(page: &Page) -> Result<String> {
+    fetch_html(
+        page,
+        &format!("{SITE_ORIGIN}{SEARCH_PATH}?jurisdiccion=nacional"),
+    )
+    .await
+}
+
+/// Lists of the national search form. `LawType` is a local constant (`main` answers it before
+/// launching Chrome); it is kept here so the match stays exhaustive.
+async fn run_list_national(page: &Page, what: NationalList) -> Result<()> {
+    match what {
+        NationalList::Agencies => print_json_array(
+            &parse_agencies(&fetch_national_form(page).await?)?,
+            "agencies",
+        ),
+        NationalList::Years => {
+            print_json_array(&parse_years(&fetch_national_form(page).await?)?, "years")
+        }
+        NationalList::LawType => print_json_array(LAW_TYPES, "law types"),
+    }
 }
 
 /// Pages to walk: all of them, unless the cap is lower.
@@ -695,7 +766,14 @@ async fn main() -> Result<()> {
         } if province.is_none() || query.is_none() => {
             bail!("--province and --query are required")
         }
-        Command::List | Command::Query { .. } => {}
+        // Slugs are a local constant: answer without launching Chrome.
+        Command::List {
+            scope:
+                Some(ListScope::National {
+                    what: NationalList::LawType,
+                }),
+        } => return print_json_array(LAW_TYPES, "law types"),
+        Command::List { .. } | Command::Query { .. } => {}
     }
 
     // stdout carries data only; logs go to stderr.
@@ -709,7 +787,10 @@ async fn main() -> Result<()> {
 
     let (mut browser, handler_task, page) = launch_browser().await?;
     let outcome = match &cli.command {
-        Command::List => run_list(&page).await,
+        Command::List { scope: None } => run_list(&page).await,
+        Command::List {
+            scope: Some(ListScope::National { what }),
+        } => run_list_national(&page, *what).await,
         Command::Query {
             scope: Some(QueryScope::National(args)),
             ..
@@ -993,9 +1074,94 @@ mod tests {
         assert!(matches!(
             cli,
             Ok(Cli {
-                command: Command::List
+                command: Command::List { scope: None }
             })
         ));
+    }
+
+    #[test]
+    fn cli_list_national_subcommands_parse() {
+        // Arrange
+        let cases = [
+            ("agencies", NationalList::Agencies),
+            ("law-type", NationalList::LawType),
+            ("years", NationalList::Years),
+        ];
+
+        for (name, expected) in cases {
+            // Act
+            let cli = Cli::try_parse_from(["argentina-normativa-cli", "list", "national", name]);
+
+            // Assert
+            assert!(
+                matches!(
+                    cli,
+                    Ok(Cli {
+                        command: Command::List {
+                            scope: Some(ListScope::National { what })
+                        }
+                    }) if what == expected
+                ),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn cli_list_national_without_or_with_unknown_list_fails() {
+        // Act
+        let missing = Cli::try_parse_from(["argentina-normativa-cli", "list", "national"]);
+        let unknown = Cli::try_parse_from(["argentina-normativa-cli", "list", "national", "bogus"]);
+
+        // Assert
+        assert!(missing.is_err());
+        assert!(unknown.is_err());
+    }
+
+    #[test]
+    fn parse_agencies_national_fixture_ignores_placeholder_and_second_form() -> Result<()> {
+        // Arrange
+        let html = std::fs::read_to_string("tests/fixtures/form_national.html")?;
+
+        // Act
+        let agencies = parse_agencies(&html)?;
+
+        // Assert
+        assert_eq!(
+            agencies,
+            vec![
+                "1RA. COM. NAC. DE SALARIOS IND. DEL VESTIDO TRABAJO A DOMIC.".to_owned(),
+                "ADM. GRAL. DEL SERVICIO NACIONAL DE SANIDAD ANIMAL".to_owned(),
+                "ADMINISTRACION ADUANA BARILOCHE".to_owned(),
+            ]
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_years_national_fixture_keeps_site_order_as_numbers() -> Result<()> {
+        // Arrange
+        let html = std::fs::read_to_string("tests/fixtures/form_national.html")?;
+
+        // Act
+        let years = parse_years(&html)?;
+
+        // Assert
+        assert_eq!(years, vec![2026, 2025, 2024]);
+        Ok(())
+    }
+
+    #[test]
+    fn parse_years_non_numeric_option_returns_error() {
+        // Arrange
+        let html = r#"<form id="infoleg-normativa-search-form"><select name="anio">
+            <option value="dos mil">x</option></select></form>"#;
+
+        // Act
+        let result = parse_years(html);
+
+        // Assert
+        assert!(result.is_err());
     }
 
     #[test]
