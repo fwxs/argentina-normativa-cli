@@ -64,15 +64,22 @@ Searches laws and prints one JSON object per line. Pick what to search with a su
 
 #### `query provinces`
 
-Searches the laws of one province.
+Searches the laws of one province. At least one filter is required (an unfiltered search is every law of the province,
+thousands of rows).
 
 ```bash
 argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"
+argentina-normativa-cli query provinces --province "Buenos Aires" --year 2020
+argentina-normativa-cli query provinces --province "Buenos Aires" --from-date 2020-01-01 --to-date 2020-12-31
 ```
 
 | Option | Description |
 | --- | --- |
 | `--province <name>` | Province name exactly as printed by `list` (required). |
+| `--law-number <n>` | "Número": digits only. |
+| `--year <yyyy>` | "Año" (1853 or later). |
+| `--from-date <YYYY-MM-DD>` | "Publicación desde". |
+| `--to-date <YYYY-MM-DD>` | "Publicación hasta". |
 | `--query <keywords>` | Keywords for "Buscá por palabras clave". All words must match. |
 
 Example line (wrapped for readability):

@@ -59,6 +59,10 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - Searching works with plain GETs: `/normativa?provincia=<name>&jurisdiccion=provincial&tipo_norma=Ley&texto=<kw>&limit=50&offset=<page>`.
   `offset` is a **1-based page number**, not a row offset. Cloudflare Turnstile only guards the POST form submit, so the
   scraper navigates by URL instead of filling the form.
+  Optional filters are added only when set, with the **provincial** form's names (verified live 2026-10-10, they differ
+  from national): year is `sancion` (`anio` is silently ignored), `numero`, and flat ISO `publicacion_desde` /
+  `publicacion_hasta` (the form's `publicacion_desde[date]` returns no rows, `dd-mm-yyyy` filters nothing); `texto`
+  may be omitted. `validate_provinces` needs at least one filter: a bare province is thousands of rows (Buenos Aires: 88 pages).
 - National search (`query national`) is also plain GET: `/normativa?jurisdiccion=nacional&tipo_norma=&numero=&anio=&dependencia=&publicacion_desde=&publicacion_hasta=&texto=&s=1&page=<n>`.
   Send **every** param, even empty. `page` is **0-based**, 50 rows per page, no `limit`/`offset`. Dates must be ISO
   `YYYY-MM-DD` (`dd-mm-aaaa`, the form placeholder, returns nothing). `tipo_norma` is a slug (`leyes`, `decretos`, ...;
