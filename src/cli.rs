@@ -69,15 +69,27 @@ pub enum QueryScope {
     National(NationalArgs),
 }
 
-/// Arguments of `query provinces`.
+/// Arguments of `query provinces`: the province plus the form filters; at least one filter is required.
 #[derive(Debug, Args, PartialEq)]
 pub struct ProvinceArgs {
     /// Province name exactly as printed by `list`.
     #[arg(long)]
     pub(crate) province: String,
+    /// "Número": law number, digits only.
+    #[arg(long, value_parser = value_parser!(u64))]
+    pub(crate) law_number: Option<u64>,
+    /// "Año": four-digit year (the site's year select starts at 1853).
+    #[arg(long, value_parser = value_parser!(u16).range(1853..))]
+    pub(crate) year: Option<u16>,
+    /// "Publicación desde": YYYY-MM-DD.
+    #[arg(long, value_name = "YYYY-MM-DD", value_parser = non_empty_trimmed)]
+    pub(crate) from_date: Option<String>,
+    /// "Publicación hasta": YYYY-MM-DD.
+    #[arg(long, value_name = "YYYY-MM-DD", value_parser = non_empty_trimmed)]
+    pub(crate) to_date: Option<String>,
     /// Keywords for "Buscá por palabras clave", e.g. "impuesto tasa".
-    #[arg(long)]
-    pub(crate) query: String,
+    #[arg(long, value_parser = non_empty_trimmed)]
+    pub(crate) query: Option<String>,
 }
 
 /// Arguments of `query national`: the form filters plus a crawl cap.
@@ -203,7 +215,7 @@ mod tests {
         assert!(matches!(
             cli,
             Ok(Cli { command: Command::Query { scope: QueryScope::Provinces(args) } })
-                if args.province == "Córdoba" && args.query == "impuesto tasa"
+                if args.province == "Córdoba" && args.query.as_deref() == Some("impuesto tasa")
         ));
     }
 
@@ -223,7 +235,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_query_provinces_without_query_fails() {
+    fn cli_query_provinces_without_query_parses() {
         // Act
         let cli = Cli::try_parse_from([
             "argentina-normativa-cli",
@@ -231,10 +243,109 @@ mod tests {
             "provinces",
             "--province",
             "Córdoba",
+            "--year",
+            "2020",
         ]);
 
         // Assert
-        assert!(cli.is_err());
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Query { scope: QueryScope::Provinces(args) } })
+                if args.query.is_none() && args.year == Some(2020)
+        ));
+    }
+
+    #[test]
+    fn cli_query_provinces_with_flags_parses_every_filter() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "provinces",
+            "--province",
+            "Buenos Aires",
+            "--law-number",
+            "14709",
+            "--year",
+            "2015",
+            "--from-date",
+            "2015-01-01",
+            "--to-date",
+            "2015-12-31",
+            "--query",
+            "impuesto",
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Query { scope: QueryScope::Provinces(args) } })
+                if args == ProvinceArgs {
+                    province: "Buenos Aires".to_owned(),
+                    law_number: Some(14709),
+                    year: Some(2015),
+                    from_date: Some("2015-01-01".to_owned()),
+                    to_date: Some("2015-12-31".to_owned()),
+                    query: Some("impuesto".to_owned()),
+                }
+        ));
+    }
+
+    #[test]
+    fn cli_query_provinces_empty_or_blank_values_fail() {
+        // Act / Assert
+        for flag in ["--query", "--from-date", "--to-date"] {
+            for blank in ["", "   "] {
+                let cli = Cli::try_parse_from([
+                    "argentina-normativa-cli",
+                    "query",
+                    "provinces",
+                    "--province",
+                    "Córdoba",
+                    flag,
+                    blank,
+                ]);
+                assert!(cli.is_err(), "accepted `{flag} {blank:?}`");
+            }
+        }
+    }
+
+    #[test]
+    fn cli_query_provinces_padded_values_are_trimmed() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "provinces",
+            "--province",
+            "Córdoba",
+            "--query",
+            "  impuesto ",
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Query { scope: QueryScope::Provinces(args) } })
+                if args.query.as_deref() == Some("impuesto")
+        ));
+    }
+
+    #[test]
+    fn cli_query_provinces_non_numeric_law_number_or_old_year_fail() {
+        // Act / Assert
+        for (flag, value) in [("--law-number", "12a"), ("--year", "1852")] {
+            let cli = Cli::try_parse_from([
+                "argentina-normativa-cli",
+                "query",
+                "provinces",
+                "--province",
+                "Córdoba",
+                flag,
+                value,
+            ]);
+            assert!(cli.is_err(), "accepted `{flag} {value}`");
+        }
     }
 
     #[test]

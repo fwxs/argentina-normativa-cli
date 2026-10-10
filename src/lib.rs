@@ -23,7 +23,7 @@ use crate::commands::{
 };
 use crate::output::print_json_array;
 use crate::site::LAW_TYPES;
-use crate::validate::{validate_fetch, validate_national};
+use crate::validate::{validate_fetch, validate_national, validate_provinces};
 
 /// Runs one parsed command: validates input, drives Chrome and prints the result to stdout.
 ///
@@ -44,9 +44,9 @@ pub async fn run(cli: Cli) -> Result<()> {
                 }),
         } => return print_json_array(LAW_TYPES, "law types"),
         Command::Query {
-            scope: QueryScope::Provinces(_),
-        }
-        | Command::List { .. } => {}
+            scope: QueryScope::Provinces(args),
+        } => validate_provinces(args)?,
+        Command::List { .. } => {}
     }
 
     let (mut browser, handler_task, page) = launch_browser().await?;

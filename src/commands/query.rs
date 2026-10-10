@@ -61,17 +61,14 @@ async fn run_search(
 }
 
 pub(crate) async fn run_query_provinces(page: &Page, args: &ProvinceArgs) -> Result<()> {
-    let ProvinceArgs { province, query } = args;
-    // The provincial site's `offset` is a 1-based page number.
-    let written = run_search(page, Some(province), usize::MAX, |page_index| {
-        search_url(province, query, page_index + 1)
+    let written = run_search(page, Some(&args.province), usize::MAX, |page_index| {
+        search_url(args, page_index + 1)
     })
     .await?;
     if written == 0 {
         tracing::warn!(
-            provincia = province.as_str(),
-            query = query.as_str(),
-            "no results; check the province name with `list`"
+            provincia = args.province.as_str(),
+            "no results; check the province name with `list` and the filters"
         );
     }
     Ok(())
