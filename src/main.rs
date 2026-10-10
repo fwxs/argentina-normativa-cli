@@ -107,6 +107,15 @@ enum QueryScope {
     National(NationalFilters),
 }
 
+/// clap parser for free-text filters: trims, and rejects empty values so they can't pass for a filter.
+fn non_empty_trimmed(value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err("value must not be empty".to_owned());
+    }
+    Ok(trimmed.to_owned())
+}
+
 /// Fields of the national search form; every one is optional but at least one must be given.
 #[derive(Debug, Default, Args, PartialEq)]
 struct NationalFilters {
@@ -120,16 +129,16 @@ struct NationalFilters {
     #[arg(long, value_parser = value_parser!(u16).range(1853..=2100))]
     year: Option<u16>,
     /// "Organismo o dependencia": exact (upper-case) agency name as listed by the site.
-    #[arg(long)]
+    #[arg(long, value_parser = non_empty_trimmed)]
     agency: Option<String>,
     /// "Publicación desde": YYYY-MM-DD.
-    #[arg(long, value_name = "YYYY-MM-DD")]
+    #[arg(long, value_name = "YYYY-MM-DD", value_parser = non_empty_trimmed)]
     from_date: Option<String>,
     /// "Publicación hasta": YYYY-MM-DD.
-    #[arg(long, value_name = "YYYY-MM-DD")]
+    #[arg(long, value_name = "YYYY-MM-DD", value_parser = non_empty_trimmed)]
     to_date: Option<String>,
     /// Keywords for "Buscá por palabras clave", e.g. "impuesto".
-    #[arg(long)]
+    #[arg(long, value_parser = non_empty_trimmed)]
     query: Option<String>,
 }
 
@@ -1075,6 +1084,45 @@ mod tests {
                     to_date: Some("2026-12-31".to_owned()),
                     query: Some("impuesto".to_owned()),
                 }
+        ));
+    }
+
+    #[test]
+    fn cli_query_national_empty_or_blank_values_fail() {
+        // Act / Assert
+        for flag in ["--query", "--agency", "--from-date", "--to-date"] {
+            for blank in ["", "   "] {
+                let cli = Cli::try_parse_from([
+                    "argentina-normativa-cli",
+                    "query",
+                    "national",
+                    flag,
+                    blank,
+                ]);
+                assert!(cli.is_err(), "accepted `{flag} {blank:?}`");
+            }
+        }
+    }
+
+    #[test]
+    fn cli_query_national_padded_values_are_trimmed() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "national",
+            "--query",
+            "  impuesto ",
+            "--agency",
+            " MINISTERIO DE ECONOMIA",
+        ]);
+
+        // Assert
+        assert!(matches!(
+            cli,
+            Ok(Cli { command: Command::Query { scope: Some(QueryScope::National(filters)), .. } })
+                if filters.query.as_deref() == Some("impuesto")
+                    && filters.agency.as_deref() == Some("MINISTERIO DE ECONOMIA")
         ));
     }
 
