@@ -30,6 +30,16 @@ Prints the provinces of the "Elegí una provincia" select as a JSON array. Use t
 argentina-normativa-cli list
 ```
 
+#### `list national`
+
+Prints the values the national search form accepts, as JSON arrays, to use with `query national`.
+
+```bash
+argentina-normativa-cli list national agencies   # --agency: 1690 exact upper-case names
+argentina-normativa-cli list national law-type   # --law-type: slugs such as leyes, decretos (no browser needed)
+argentina-normativa-cli list national years      # --year: 2026 down to 1853
+```
+
 ### `query`
 
 Searches the laws of one province and prints one JSON object per line.
@@ -72,10 +82,10 @@ argentina-normativa-cli query national --query "impuesto" --agency "MINISTERIO D
 
 | Option | Description |
 | --- | --- |
-| `--law-type <slug>` | "Tipo de norma": `leyes`, `decretos`, `resoluciones`, `disposiciones`, ... (see `--help`). |
+| `--law-type <slug>` | "Tipo de norma": `leyes`, `decretos`, `resoluciones`, ... (see `list national law-type`). |
 | `--law-number <n>` | "Número": digits only. |
-| `--year <yyyy>` | "Año". The site finds nothing for `leyes` + year; use the dates for laws. |
-| `--agency <name>` | "Organismo o dependencia": exact upper-case name as the site lists it. |
+| `--year <yyyy>` | "Año" (see `list national years`). The site finds nothing for `leyes` + year; use the dates for laws. |
+| `--agency <name>` | "Organismo o dependencia": exact upper-case name (see `list national agencies`). |
 | `--from-date <YYYY-MM-DD>` | "Publicación desde". |
 | `--to-date <YYYY-MM-DD>` | "Publicación hasta". |
 | `--query <keywords>` | "Buscá por palabras clave". |
