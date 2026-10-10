@@ -307,9 +307,9 @@ fn collapse_whitespace(text: &str) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// Option values of `<select name="...">`, skipping the empty placeholder.
-fn parse_options(html: &str, select_name: &str) -> Result<Vec<String>> {
-    let option_selector = selector(&format!("select[name={select_name}] option"))?;
+/// Option values of the select matched by `select_css`, skipping the empty placeholder.
+fn parse_options(html: &str, select_css: &str) -> Result<Vec<String>> {
+    let option_selector = selector(&format!("{select_css} option"))?;
     Ok(Html::parse_document(html)
         .select(&option_selector)
         .filter_map(|option| option.value().attr("value"))
@@ -538,7 +538,7 @@ async fn run_list(page: &Page) -> Result<()> {
         &format!("{SITE_ORIGIN}{SEARCH_PATH}?jurisdiccion=provincial"),
     )
     .await?;
-    let provinces = parse_options(&html, "provincia")?;
+    let provinces = parse_options(&html, "select[name=provincia]")?;
     writeln!(
         std::io::stdout(),
         "{}",
@@ -963,7 +963,7 @@ mod tests {
             <option value="Córdoba">Córdoba</option></select>"#;
 
         // Act
-        let options = parse_options(html, "provincia")?;
+        let options = parse_options(html, "select[name=provincia]")?;
 
         // Assert
         assert_eq!(options, vec!["Córdoba".to_owned()]);
