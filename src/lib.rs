@@ -3,6 +3,8 @@
 //! `query national`, national norms) as JSON lines;
 //! `fetch` prints one law's details as JSON and saves its text as a PDF.
 
+mod model;
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -12,12 +14,14 @@ use chromiumoxide::browser::{Browser, BrowserConfig};
 use chromiumoxide::cdp::browser_protocol::page::PrintToPdfParams;
 use chromiumoxide::page::Page;
 use clap::builder::PossibleValuesParser;
-use clap::{Args, Parser, Subcommand, ValueEnum, value_parser};
+use clap::{Args, Parser, Subcommand, value_parser};
 use futures::StreamExt;
 use scraper::{Html, Selector};
 use serde::Serialize;
 use tokio::task::JoinHandle;
 use url::Url;
+
+use crate::model::{Jurisdiccion, LawDetails, Normativa, ResultsPage};
 
 const SITE_ORIGIN: &str = "https://www.argentina.gob.ar";
 const SEARCH_PATH: &str = "/normativa";
@@ -177,57 +181,6 @@ pub struct NationalFilters {
     query: Option<String>,
 }
 
-#[derive(Debug, Serialize, PartialEq)]
-struct LawDetails {
-    provincia: String,
-    jurisdiccion: Jurisdiccion,
-    titulo: String,
-    ley: String,
-    estado: Option<String>,
-    url: String,
-    pdf: String,
-}
-
-#[derive(Debug, Serialize, PartialEq)]
-struct Normativa {
-    provincia: Option<String>,
-    jurisdiccion: Jurisdiccion,
-    tipo_norma: String,
-    titulo: String,
-    // Issuing agency; only national rows carry it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    organismo: Option<String>,
-    // Last path segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
-    ley: String,
-    url: String,
-    fecha_publicacion: Option<String>,
-    descripcion: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, ValueEnum)]
-#[serde(rename_all = "lowercase")]
-pub enum Jurisdiccion {
-    Provincial,
-    Nacional,
-}
-
-impl Jurisdiccion {
-    fn from_path_segment(segment: &str) -> Option<Self> {
-        match segment {
-            "provincial" => Some(Self::Provincial),
-            "nacional" => Some(Self::Nacional),
-            _ => None,
-        }
-    }
-
-    fn path_segment(self) -> &'static str {
-        match self {
-            Self::Provincial => "provincial",
-            Self::Nacional => "nacional",
-        }
-    }
-}
-
 /// `--law` ends up in a url path and a file name, so only slug characters are allowed.
 fn validate_law_slug(ley: &str) -> Result<()> {
     if ley.is_empty() || !ley.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
@@ -313,12 +266,6 @@ fn parse_law_href(href: &str) -> Option<(Jurisdiccion, &str)> {
         return None;
     }
     Some((Jurisdiccion::from_path_segment(segment)?, ley))
-}
-
-#[derive(Debug, PartialEq)]
-struct ResultsPage {
-    total_pages: usize,
-    rows: Vec<Normativa>,
 }
 
 fn selector(css: &str) -> Result<Selector> {
