@@ -10,7 +10,25 @@ Command-line scraper for the provincial laws published on
 ## Requirements
 
 - [Rust](https://www.rust-lang.org/tools/install) (edition 2024, so a recent stable toolchain)
-- Google Chrome (or Chromium) installed on the machine. The scraper launches it in headless mode; no browser is bundled.
+- A Chromium-based browser installed on the system: Chromium, Google Chrome or Brave. The scraper launches it in
+  headless mode; no browser is bundled. See [Choosing the browser](#choosing-the-browser).
+
+### Choosing the browser
+
+The browser is auto-detected. In order, the scraper uses:
+
+1. The executable whose full path is in the `CHROME` environment variable.
+2. The first of `chrome`, `chrome-browser`, `google-chrome-stable`, `chromium`, `chromium-browser` or `msedge`
+   found on your `PATH`, then a few well-known install locations (e.g. `/opt/google/chrome`).
+
+Chromium and Google Chrome are found this way once installed. **Brave is not auto-detected**; point `CHROME` at it:
+
+```bash
+CHROME=/usr/bin/brave argentina-normativa-cli list   # use the output of `which brave` if it differs
+```
+
+`CHROME` has to be a full path to an existing file, not just a command name. Without any browser the command fails
+with `Could not auto detect a chrome executable`.
 
 ## Build
 
