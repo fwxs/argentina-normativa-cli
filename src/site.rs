@@ -8,6 +8,7 @@ use url::Url;
 use crate::model::Jurisdiccion;
 use crate::{NationalFilters, ProvinceArgs};
 
+pub(crate) const SITE_HOST: &str = "www.argentina.gob.ar";
 pub(crate) const SITE_ORIGIN: &str = "https://www.argentina.gob.ar";
 pub(crate) const SEARCH_PATH: &str = "/normativa";
 pub(crate) const PAGE_SIZE: &str = "50";
@@ -48,8 +49,15 @@ pub(crate) const LAW_TYPES: &[&str] = &[
 // rows, and every page costs a crawl delay.
 pub(crate) const DEFAULT_MAX_PAGES: u32 = 20;
 
+const LAW_TEXT_PATH_SUFFIX: &str = "/actualizacion";
+
 // robots.txt asks for `Crawl-delay: 10`.
 pub(crate) const CRAWL_DELAY: Duration = Duration::from_secs(10);
+
+/// Law slugs are letters, digits and dashes, so they are safe in a url path and a file name.
+pub(crate) fn is_law_slug(ley: &str) -> bool {
+    !ley.is_empty() && ley.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+}
 
 /// Splits a law link `/normativa/<jurisdiccion>/<ley>` into its jurisdiction and law slug.
 pub(crate) fn parse_law_href(href: &str) -> Option<(Jurisdiccion, &str)> {
@@ -57,7 +65,7 @@ pub(crate) fn parse_law_href(href: &str) -> Option<(Jurisdiccion, &str)> {
         .strip_prefix(SEARCH_PATH)?
         .strip_prefix('/')?
         .split_once('/')?;
-    if ley.is_empty() || ley.contains('/') {
+    if !is_law_slug(ley) {
         return None;
     }
     Some((Jurisdiccion::from_path_segment(segment)?, ley))
@@ -66,6 +74,14 @@ pub(crate) fn parse_law_href(href: &str) -> Option<(Jurisdiccion, &str)> {
 pub(crate) fn law_url(jurisdiccion: Jurisdiccion, ley: &str) -> String {
     format!(
         "{SITE_ORIGIN}{SEARCH_PATH}/{}/{ley}",
+        jurisdiccion.path_segment()
+    )
+}
+
+/// Site path of the page holding the law text, which the law page's "Ver norma" button links to.
+pub(crate) fn law_text_path(jurisdiccion: Jurisdiccion, ley: &str) -> String {
+    format!(
+        "{SEARCH_PATH}/{}/{ley}{LAW_TEXT_PATH_SUFFIX}",
         jurisdiccion.path_segment()
     )
 }
@@ -171,6 +187,28 @@ mod tests {
     fn parse_law_href_unknown_jurisdiction_returns_none() {
         // Act / Assert
         assert_eq!(parse_law_href("/normativa/municipal/ley-1"), None);
+    }
+
+    #[test]
+    fn parse_law_href_non_slug_characters_return_none() {
+        // Act / Assert
+        for href in [
+            "/normativa/provincial/..",
+            "/normativa/provincial/ley-1?next=x",
+            "/normativa/provincial/ley-1#frag",
+            "/normativa/provincial/ley%2D1",
+        ] {
+            assert_eq!(parse_law_href(href), None, "accepted `{href}`");
+        }
+    }
+
+    #[test]
+    fn law_text_path_provincial_law_appends_actualizacion() {
+        // Act
+        let path = law_text_path(Jurisdiccion::Provincial, "ley-1");
+
+        // Assert
+        assert_eq!(path, "/normativa/provincial/ley-1/actualizacion");
     }
 
     #[test]
