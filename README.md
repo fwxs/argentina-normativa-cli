@@ -108,7 +108,7 @@ argentina-normativa-cli query national --query "impuesto" --agency "MINISTERIO D
 | `--query <keywords>` | "Buscá por palabras clave". |
 | `--max-pages <n>` | Stop after `n` result pages (50 rows each, 10 s apart). Without it every page is fetched, one per 10 s; a warning on stderr says when the result was truncated. |
 
-Output lines have the same shape as the provincial ones, with `"provincia": null`, `"jurisdiccion": "nacional"`, an
+Output lines have the same shape as the provincial ones, without `provincia`, with `"jurisdiccion": "nacional"`, an
 extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`, which `fetch --jurisdiction nacional --law` accepts.
 
 ### `fetch`
