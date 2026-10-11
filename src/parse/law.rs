@@ -31,7 +31,7 @@ const PROVINCIAL_LAYOUT: LawPageLayout = LawPageLayout {
 };
 
 // The province; the page is not a law page without it.
-const PROVINCE_SELECTOR: &str = ".label";
+const PROVINCE_SELECTOR: &str = ".label.label-default";
 
 const PROVINCIAL_STATUS_SELECTOR: &str = "p.m-b-0:nth-child(4) > small:nth-child(1)";
 
@@ -88,11 +88,15 @@ fn parse_law_details(
             let Some(provincia) = text_of(PROVINCE_SELECTOR)? else {
                 bail!("law not found: no province on the page; check `--law`");
             };
+            let estado = text_of(PROVINCIAL_STATUS_SELECTOR)?;
+            if estado.is_none() {
+                tracing::warn!(ley, "law status not found on the page");
+            }
             LawDetails::Provincial(ProvincialMetadata {
                 provincia,
                 titulo,
                 ley,
-                estado: text_of(PROVINCIAL_STATUS_SELECTOR)?,
+                estado,
                 url,
                 archivo,
             })
@@ -196,6 +200,34 @@ mod tests {
                 archivo: "out/ley.md".to_owned(),
             })
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_law_page_provincial_page_without_status_returns_no_status() -> Result<()> {
+        // Arrange
+        let html = LAW_FIXTURE.replace(
+            r#"<p class="lead m-b-0"><small>Vigente, de alcance general</small></p>"#,
+            "",
+        );
+        assert_ne!(
+            html, LAW_FIXTURE,
+            "the fixture no longer has the status paragraph"
+        );
+
+        // Act
+        let page = parse_law_page(
+            &html,
+            Jurisdiccion::Provincial,
+            LAW_SLUG,
+            Path::new("out/ley.md"),
+        )?;
+
+        // Assert
+        assert!(matches!(
+            page.details,
+            LawDetails::Provincial(ProvincialMetadata { estado: None, .. })
+        ));
         Ok(())
     }
 
