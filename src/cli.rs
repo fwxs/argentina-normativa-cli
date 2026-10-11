@@ -28,7 +28,7 @@ pub enum Command {
         #[command(subcommand)]
         scope: QueryScope,
     },
-    /// Print a law's province, title and status as JSON and save its text as a PDF (default `<law>.pdf`).
+    /// Print a law's province, title and status as JSON and save its text as Markdown.
     Fetch {
         /// Jurisdiction segment of the law url (only `provincial` is supported for now).
         #[arg(long)]
@@ -36,7 +36,7 @@ pub enum Command {
         /// Law slug, last segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
         #[arg(long)]
         law: String,
-        /// File the PDF is written to; defaults to `<law>.pdf` in the current directory.
+        /// Markdown file for the law text; defaults to `<law>.md` in the current directory.
         #[arg(long, value_name = "FILE_PATH")]
         output: Option<PathBuf>,
     },
@@ -597,14 +597,14 @@ mod tests {
             "--law",
             "ley-1",
             "--output",
-            "laws/ley-1.pdf",
+            "laws/ley-1.md",
         ]);
 
         // Assert
         assert!(matches!(
             cli,
             Ok(Cli { command: Command::Fetch { output: Some(output), .. } })
-                if output == Path::new("laws/ley-1.pdf")
+                if output == Path::new("laws/ley-1.md")
         ));
     }
 }

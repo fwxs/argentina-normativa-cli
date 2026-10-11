@@ -1,7 +1,7 @@
 //! Scrapes "Normativas" from argentina.gob.ar/normativa, driving headless Chrome.
 //! `list` prints the provinces of the search form; `query provinces` prints matching provincial laws and
 //! `query national` national norms, as JSON lines;
-//! `fetch` prints one law's details as JSON and saves its text as a PDF.
+//! `fetch` prints one law's details as JSON and saves its text as Markdown.
 
 mod browser;
 mod cli;

@@ -11,7 +11,8 @@ pub(crate) struct LawDetails {
     pub(crate) ley: String,
     pub(crate) estado: Option<String>,
     pub(crate) url: String,
-    pub(crate) pdf: String,
+    // File the law text was saved to.
+    pub(crate) archivo: String,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
