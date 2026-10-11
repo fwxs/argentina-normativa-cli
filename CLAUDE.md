@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-`argentina-normativa-cli`: a Rust (edition 2024) CLI that drives headless Chrome against
-https://www.argentina.gob.ar/normativa to collect **provincial laws** (`Ley`). It needs a system Chrome
-(`chromiumoxide` launches it; no bundled browser). Law PDFs written by `fetch` land in the working directory.
+`argentina-normativa-cli`: a Rust (edition 2024) CLI that scrapes https://www.argentina.gob.ar/normativa with plain
+HTTPS GETs (`reqwest`) to collect **provincial laws** (`Ley`) and national norms. No browser: every page it reads is
+server-rendered. Law texts written by `fetch` (Markdown, `<ley>.md`) land in the working directory.
 
 ## Commands
 
@@ -21,7 +21,7 @@ argentina-normativa-cli list                                         # provinces
 argentina-normativa-cli list national <agencies|law-type|years>      # values for `query national` flags, JSON array
 argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"   # provincial, JSON lines
 argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
-argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.pdf]
+argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.md]
 ```
 
 `cargo clippy`/`cargo test` do not produce `target/release/...`; build it explicitly before live runs.
@@ -34,24 +34,23 @@ Modules, one domain each; unit tests sit in a `#[cfg(test)]` module at the botto
 
 - `cli` clap types (`Cli`, `Command`, `NationalFilters`, ...) · `model` shared types (`Jurisdiccion`, `Normativa`, ...)
 - `site` constants (`LAW_TYPES`, `CRAWL_DELAY`, ...) and url builders · `validate` input checks
-- `parse/{mod,results,law,national}` pure HTML parsers · `browser` Chrome launch/navigation · `output` stdout writers
+- `parse/{mod,results,law,national}` pure HTML parsers · `http` client + `fetch_html` · `output` stdout writers
 - `commands/{list,query,fetch}` one runner per subcommand
 
-Flow per subcommand: `lib::run` validates input **before** launching Chrome → `launch_browser` →
-`run_list | run_query_provinces | run_query_national | run_fetch` → close browser, then return the command's result.
+Flow per subcommand: `lib::run` validates input **before** any request → `build_client` →
+`run_list | run_query_provinces | run_query_national | run_fetch`, each taking `&reqwest::Client`.
 Keep items `pub(crate)` unless `main.rs` needs them.
 
-Parsing is kept pure and separate from browsing: `fetch_html` (`page.goto` + `page.content()`) returns HTML, and
-`parse_options` / `parse_results` / `parse_law_page` turn it into data with the `scraper` crate. This is what makes
-the tests offline: they run the parsers against saved pages in `tests/fixtures/` (`results.html`, `law.html`).
+Parsing is kept pure and separate from fetching: `fetch_html` (GET, non-2xx is an error) returns HTML, and
+`parse_options` / `parse_results` / `parse_law_page` / `parse_law_text` turn it into data with the `scraper` crate.
+This is what makes the tests offline: they run the parsers against saved pages in `tests/fixtures/`
+(`results.html`, `law.html`, `law_text.html`, ...).
 When a selector breaks, refresh the fixture from the live page and fix the parser, not the other way round.
 
 - **stdout is data only** (JSON / JSON lines); all logs go to stderr via `tracing`. Don't `println!` anything else.
-- The `chromiumoxide` handler task must keep polling `handler.next()` and ignore errors: Chrome emits CDP
-  messages the crate can't decode, and breaking on the first one kills the browser connection.
 - Law URL shape: `/normativa/<provincial|nacional>/<ley-slug>`; `parse_law_href` / `law_url` convert both ways.
   Only `provincial` is verified live. `fetch --jurisdiction nacional` is deliberately rejected in `validate_fetch`.
-- `--law` becomes both a URL path and the default PDF file name, so `validate_law_slug` allowlists
+- `--law` becomes both a URL path and the default Markdown file name, so `validate_law_slug` allowlists
   `[A-Za-z0-9-]+`. Keep new user input going into URLs/paths behind a similar check.
 
 ## Site behaviour that is easy to get wrong
@@ -70,14 +69,16 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   Counter is `div.infoleg-search-results-count` ("N normas encontradas en P páginas", pages only as text); rows link to
   `/normativa/nacional/norma-<id>` and the issuing agency is the `p.small` in the Normativa cell.
   The national page has two forms with a `dependencia` select (1690 agencies each); `list national` scopes to
-  `form#infoleg-normativa-search-form` to avoid duplicates. `list national law-type` prints `LAW_TYPES`, no Chrome.
+  `form#infoleg-normativa-search-form` to avoid duplicates. `list national law-type` prints `LAW_TYPES`, no request.
   `query national` stops after `--max-pages` (default `DEFAULT_MAX_PAGES` = 20) and warns when truncated; provincial is uncapped.
 - `tipo_norma` is mandatory (empty/`todas`/`*` return nothing); provincial search is fixed to `Ley`.
 - `texto` is AND-semantics across words. Province names are exact, accented strings from `list` (e.g. `Córdoba`).
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
   requests of `fetch`. Don't remove it or parallelise requests.
-- `fetch` clicks `a.btn.btn-primary` ("Ver norma"), which navigates to `<law url>/actualizacion` (the law text), and prints
-  that page to PDF. The click only *starts* navigation, so `wait_for_url_suffix` polls the URL before printing.
+- `fetch` reads the `href` of `a.btn.btn-primary` ("Ver norma"), `<law path>/actualizacion`; `parse_law_text_link`
+  only accepts a law path plus that suffix, so the page can't redirect the second GET. The law text is
+  `article.m-t-2` there, rendered to Markdown by `parse_law_text`. A missing slug is a real HTTP 404, which `run_fetch`
+  reports as "law not found".
 
 ## Conventions
 

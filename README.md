@@ -1,34 +1,17 @@
 # argentina-normativa-cli
 
 Command-line scraper for the provincial laws published on
-[argentina.gob.ar/normativa](https://www.argentina.gob.ar/normativa). It drives a headless Chrome to:
+[argentina.gob.ar/normativa](https://www.argentina.gob.ar/normativa). It can:
 
 - list the provinces available in the search form,
 - search the laws (`Ley`) of a province by keyword,
-- download a single law as a PDF.
+- save the text of a single law as Markdown.
 
 ## Requirements
 
 - [Rust](https://www.rust-lang.org/tools/install) (edition 2024, so a recent stable toolchain)
-- A Chromium-based browser installed on the system: Chromium, Google Chrome or Brave. The scraper launches it in
-  headless mode; no browser is bundled. See [Choosing the browser](#choosing-the-browser).
 
-### Choosing the browser
-
-The browser is auto-detected. In order, the scraper uses:
-
-1. The executable whose full path is in the `CHROME` environment variable.
-2. The first of `chrome`, `chrome-browser`, `google-chrome-stable`, `chromium`, `chromium-browser` or `msedge`
-   found on your `PATH`, then a few well-known install locations (e.g. `/opt/google/chrome`).
-
-Chromium and Google Chrome are found this way once installed. **Brave is not auto-detected**; point `CHROME` at it:
-
-```bash
-CHROME=/usr/bin/brave argentina-normativa-cli list   # use the output of `which brave` if it differs
-```
-
-`CHROME` has to be a full path to an existing file, not just a command name. Without any browser the command fails
-with `Could not auto detect a chrome executable`.
+No browser is needed: the site's pages are server-rendered, so the scraper reads them with plain HTTPS requests.
 
 ## Build
 
@@ -54,7 +37,7 @@ Prints the values the national search form accepts, as JSON arrays, to use with 
 
 ```bash
 argentina-normativa-cli list national agencies   # --agency: 1690 exact upper-case names
-argentina-normativa-cli list national law-type   # --law-type: slugs such as leyes, decretos (no browser needed)
+argentina-normativa-cli list national law-type   # --law-type: slugs such as leyes, decretos (no request needed)
 argentina-normativa-cli list national years      # --year: 2026 down to 1853
 ```
 
@@ -125,8 +108,8 @@ extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`. `fetch`
 
 ### `fetch`
 
-Opens a law page, prints its province, title and status as JSON, then follows the "Ver norma" button and saves the
-law text as a PDF.
+Opens a law page, prints its province, title and status as JSON, then follows the "Ver norma" link and saves the
+law text as Markdown (the title as a heading, then one paragraph per block of the law).
 
 ```bash
 argentina-normativa-cli fetch --jurisdiction provincial --law ley-14709-123456789-0abc-defg-907-4100bvorpyel
@@ -136,7 +119,7 @@ argentina-normativa-cli fetch --jurisdiction provincial --law ley-14709-12345678
 | --- | --- |
 | `--jurisdiction <provincial\|nacional>` | Jurisdiction segment of the law URL. Only `provincial` is supported for now; `nacional` exits with an error. |
 | `--law <ley>` | Law slug, the last segment of the law URL. Letters, digits and dashes only. |
-| `--output <file_path>` | Where to write the PDF. Defaults to `<ley>.pdf` in the current directory. The parent directory must exist. |
+| `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist. |
 
 Output:
 
@@ -148,16 +131,16 @@ Output:
   "ley": "ley-14709-123456789-0abc-defg-907-4100bvorpyel",
   "estado": "Vigente, de alcance general",
   "url": "https://www.argentina.gob.ar/normativa/provincial/ley-14709-123456789-0abc-defg-907-4100bvorpyel",
-  "pdf": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.pdf"
+  "archivo": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.md"
 }
 ```
 
-An existing file at the output path is overwritten.
+An existing file at the output path is overwritten. A slug the site does not know exits with `law not found`.
 
 ## Output and logging
 
 Only data goes to **stdout** (JSON or JSON lines), so it can be piped, for example into `jq`. Logs go to **stderr**;
-control them with `RUST_LOG` (default `info,chromiumoxide=error`).
+control them with `RUST_LOG` (default `info`).
 
 ```bash
 argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto" | jq -r '.url'
