@@ -125,7 +125,7 @@ argentina-normativa-cli fetch --jurisdiction nacional --law norma-431079
 | --- | --- |
 | `--jurisdiction <provincial\|nacional>` | Jurisdiction segment of the law URL. |
 | `--law <ley>` | Law slug, the last segment of the law URL. Letters, digits and dashes only; for `nacional` it is `norma-` followed by the number, e.g. `norma-431079`. |
-| `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist. |
+| `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist and the file must not. |
 
 Output:
 
@@ -158,8 +158,8 @@ For a national norm the JSON has no `provincia`, but an `organismo` (issuing age
 The saved national text is the updated text when the site offers one (norms that were modified later), otherwise the
 original text.
 
-An existing file at the output path is overwritten. A slug the site does not know exits with `law not found`.
-`--output` is checked before any request is sent, so a missing directory fails immediately.
+An existing file at the output path is never overwritten: `fetch` fails before any request, and you delete the file to fetch again. A slug the site does not know exits with `law not found`.
+`--output` (or the default `<ley>.md`) is checked before any request is sent, so a missing directory or an existing file fails immediately.
 
 > **Changed from the PDF version:** `fetch` now saves Markdown instead of a PDF, and the `pdf` key of the JSON
 > output is now `archivo`. A script reading `.pdf` (for example `jq -r .pdf`) gets `null`; read `.archivo` instead.

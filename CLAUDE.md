@@ -90,7 +90,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials; one `<br>` is a space,
   two in a row end the paragraph, which national texts rely on). A missing slug is a real HTTP 404 (`FetchError::Status`, see `http`), which `run_fetch`
   reports as "law not found" ("law text not found" for the second GET).
-  `--output` is checked in `validate_fetch` (parent directory exists, not a directory) before any request.
+  `--output` (or the default `<ley>.md`) is checked in `validate_fetch` (parent directory exists, not a directory, file does not exist: never overwritten) before any request.
 
 ## Conventions
 
