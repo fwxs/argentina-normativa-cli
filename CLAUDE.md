@@ -22,6 +22,7 @@ argentina-normativa-cli list national <agencies|law-type|years>      # values fo
 argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"   # provincial, JSON lines
 argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
 argentina-normativa-cli fetch --jurisdiction provincial --law <ley-slug> [--output file.md]
+argentina-normativa-cli fetch --jurisdiction nacional --law norma-431079 [--output file.md]
 ```
 
 `cargo clippy`/`cargo test` do not produce `target/release/...`; build it explicitly before live runs.
@@ -49,7 +50,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 
 - **stdout is data only** (JSON / JSON lines); all logs go to stderr via `tracing`. Don't `println!` anything else.
 - Law URL shape: `/normativa/<provincial|nacional>/<ley-slug>`; `parse_law_href` / `law_url` convert both ways.
-  Only `provincial` is verified live. `fetch --jurisdiction nacional` is deliberately rejected in `validate_fetch`.
+  Both jurisdictions are verified live for `fetch`; a national slug is `norma-<id>` (`validate_national_slug`).
 - `--law` becomes both a URL path and the default Markdown file name, so `validate_law_slug` allowlists
   `[A-Za-z0-9-]+`. Keep new user input going into URLs/paths behind a similar check.
 
@@ -78,11 +79,15 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - `fetch_html` retries 429/502/503/504 and timeouts/connect errors up to 3 tries in total, sequentially, waiting at
   least `CRAWL_DELAY` (doubling, honouring `Retry-After`, capped at 60 s). `query` rows are printed as pages arrive,
   so a failure reports which page it died on and how many rows were already printed.
-- `fetch` reads the `href` of `a.btn.btn-primary` ("Ver norma"), `<law path>/actualizacion`; `parse_law_text_link`
-  only accepts exactly `law_text_path(<jurisdiction>, <law>)`, and the client only follows `https` redirects to the site's own host
-  (`is_allowed_redirect`), so neither the page nor a `Location` header can send the second GET elsewhere. The law text is
-  `article.m-t-2` there, rendered to Markdown by `parse_law_text`
-  (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials). A missing slug is a real HTTP 404 (`FetchError::Status`, see `http`), which `run_fetch`
+- `fetch` reads the `href`s of `a.btn.btn-primary` ("Ver norma"); `parse_law_text_link` only accepts exactly
+  `law_text_path(<jurisdiction>, <law>, kind)` for the kinds in `Jurisdiccion::text_kinds` (preferred first), and the client only
+  follows `https` redirects to the site's own host (`is_allowed_redirect`), so neither the page nor a `Location` header can
+  send the second GET elsewhere. Provincial: `<law path>/actualizacion`, text in `article.m-t-2`. National: `/actualizacion`
+  ("Ver texto actualizado") exists only for modified norms and is a real 404 otherwise, so it is used only when the page links it;
+  else `/texto` ("Ver norma original"). National text is in `div.infoleg-norma-body`, details have no province/status but an
+  `organismo` (`p.lead.m-b-0`). The text is rendered to Markdown by `parse_law_text`
+  (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials; one `<br>` is a space,
+  two in a row end the paragraph, which national texts rely on). A missing slug is a real HTTP 404 (`FetchError::Status`, see `http`), which `run_fetch`
   reports as "law not found" ("law text not found" for the second GET).
   `--output` is checked in `validate_fetch` (parent directory exists, not a directory) before any request.
 
