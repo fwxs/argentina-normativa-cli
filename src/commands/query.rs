@@ -2,7 +2,7 @@
 
 use std::io::Write;
 
-use anyhow::{Context, Result};
+use anyhow::{Context, Result, bail};
 use reqwest::Client;
 
 use crate::cli::{NationalArgs, ProvinceArgs};
@@ -13,6 +13,19 @@ use crate::site::{CRAWL_DELAY, national_search_url, search_url};
 /// Pages to walk: all of them, unless the cap is lower.
 fn pages_to_fetch(total_pages: usize, max_pages: usize) -> usize {
     total_pages.min(max_pages)
+}
+
+/// Rejects a page that cannot be right, so a broken page counter or an error page that answered
+/// 200 can't end the crawl early with exit code 0. Only the first page may be empty, and only
+/// when the counter says there is nothing.
+fn check_page(page_index: usize, total_pages: usize, row_count: usize) -> Result<()> {
+    match (page_index, total_pages, row_count) {
+        (0, 0, 0) => Ok(()),
+        (0, 0, _) => bail!("found rows but no page count; the results counter may have changed"),
+        (0, _, 0) => bail!("the counter announces {total_pages} pages but the page has no rows"),
+        (1.., _, 0) => bail!("the page has no rows"),
+        _ => Ok(()),
+    }
 }
 
 /// Walks the results pages of a search (at most `max_pages`), printing each law as a JSON line;
@@ -43,6 +56,7 @@ async fn run_search(
             .with_context(page_context)?;
         let results = parse_results(&html, provincia).with_context(page_context)?;
         let total_pages = results.total_pages;
+        check_page(page_index, total_pages, results.rows.len()).with_context(page_context)?;
         if page_index == 0 {
             last_page = pages_to_fetch(total_pages, max_pages);
             if last_page < total_pages {
@@ -154,6 +168,49 @@ mod tests {
             "{message}"
         );
         Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_search_empty_second_page_returns_error() -> Result<()> {
+        // Arrange: page 2 answers 200 with a page that has no rows, like an error page would.
+        let empty_page = html_response("<html><body>Algo salio mal</body></html>");
+        let url = serve(vec![results_page(3, 1), empty_page]).await?;
+
+        // Act
+        let result = run_search(&test_client()?, None, usize::MAX, |_| Ok(url.clone())).await;
+
+        // Assert
+        let message = format!("{:#}", result.expect_err("page 2 has no rows"));
+        assert!(
+            message.contains("failed on page 2; 1 rows were already printed"),
+            "{message}"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn check_page_first_page_without_results_is_ok() {
+        // Act / Assert
+        assert!(check_page(0, 0, 0).is_ok());
+    }
+
+    #[test]
+    fn check_page_rows_but_no_page_count_returns_error() {
+        // Act / Assert
+        assert!(check_page(0, 0, 3).is_err());
+    }
+
+    #[test]
+    fn check_page_first_page_with_count_but_no_rows_returns_error() {
+        // Act / Assert
+        assert!(check_page(0, 4, 0).is_err());
+    }
+
+    #[test]
+    fn check_page_later_page_without_rows_returns_error() {
+        // Act / Assert
+        assert!(check_page(1, 4, 0).is_err());
+        assert!(check_page(1, 4, 50).is_ok());
     }
 
     #[test]
