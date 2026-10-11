@@ -7,6 +7,10 @@ use scraper::{ElementRef, Node};
 
 use super::collapse_whitespace;
 
+// Stands for a `<br>` in inline text. It is not whitespace, so trimming around emphasis keeps it; two
+// of them in a row end a paragraph (see `finish_paragraphs`), a lone one reads as a space.
+const LINE_BREAK: char = '\u{E000}';
+
 #[derive(Clone, Copy)]
 enum Block {
     /// Only groups other blocks: its children are rendered in place.
@@ -89,9 +93,32 @@ fn escape_block_start(text: &str) -> String {
     text.to_owned()
 }
 
+/// Inline text on a single line: every line break becomes a space.
+fn flatten_breaks(text: &str) -> String {
+    text.replace(LINE_BREAK, " ")
+}
+
 /// A finished one-line block: whitespace collapsed and block-level markup escaped.
 fn finish_line(text: &str) -> Option<String> {
-    Some(escape_block_start(&collapse_whitespace(text))).filter(|line| !line.is_empty())
+    Some(escape_block_start(&collapse_whitespace(&flatten_breaks(
+        text,
+    ))))
+    .filter(|line| !line.is_empty())
+}
+
+/// The finished blocks of inline text: two or more line breaks in a row separate paragraphs.
+fn finish_paragraphs(text: &str) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    let mut current = String::new();
+    for segment in text.split(LINE_BREAK) {
+        if segment.trim().is_empty() && !current.is_empty() {
+            paragraphs.extend(finish_line(&std::mem::take(&mut current)));
+        }
+        current.push_str(segment);
+        current.push(' ');
+    }
+    paragraphs.extend(finish_line(&current));
+    paragraphs
 }
 
 /// Splits `text` into the single space (if any) before it, the text itself and the space after.
@@ -145,13 +172,20 @@ fn push_inline_element(element: ElementRef, emphasis: Emphasis, out: &mut String
         _ => (emphasis, None),
     };
     if tag == "br" {
-        out.push(' ');
+        out.push(LINE_BREAK);
         return;
     }
     let mut inner = String::new();
     push_inline_children(element, child_emphasis, &mut inner);
     match marker {
-        Some(marker) => out.push_str(&wrap_emphasis(&inner, marker)),
+        // Emphasis can't span paragraphs, so each part between line breaks is marked on its own.
+        Some(marker) => out.push_str(
+            &inner
+                .split(LINE_BREAK)
+                .map(|part| wrap_emphasis(part, marker))
+                .collect::<Vec<_>>()
+                .join(&LINE_BREAK.to_string()),
+        ),
         // A block nested where only inline text is expected must not run into its neighbours.
         None if block_kind(tag).is_some() => {
             out.push(' ');
@@ -228,7 +262,9 @@ fn render_table(table: ElementRef) -> Option<String> {
         .map(|row| {
             row.child_elements()
                 .filter(|cell| matches!(cell.value().name(), "td" | "th"))
-                .map(|cell| collapse_whitespace(&inline_text(cell)).replace('|', r"\|"))
+                .map(|cell| {
+                    collapse_whitespace(&flatten_breaks(&inline_text(cell))).replace('|', r"\|")
+                })
                 .collect::<Vec<String>>()
         })
         .filter(|cells| cells.iter().any(|cell| !cell.is_empty()))
@@ -282,9 +318,9 @@ fn quote_lines(blocks: &[String]) -> String {
 fn render_block(element: ElementRef, block: Block, blocks: &mut Vec<String>) {
     match block {
         Block::Container => collect_blocks(element, blocks),
-        Block::Paragraph => blocks.extend(finish_line(&inline_text(element))),
+        Block::Paragraph => blocks.extend(finish_paragraphs(&inline_text(element))),
         Block::Heading(level) => {
-            let heading = collapse_whitespace(&inline_text(element));
+            let heading = collapse_whitespace(&flatten_breaks(&inline_text(element)));
             if !heading.is_empty() {
                 blocks.push(format!("{} {heading}", "#".repeat(level)));
             }
@@ -324,7 +360,7 @@ fn collect_blocks(container: ElementRef, blocks: &mut Vec<String>) {
                 }
                 match block_kind(child.value().name()) {
                     Some(block) => {
-                        blocks.extend(finish_line(&std::mem::take(&mut run)));
+                        blocks.extend(finish_paragraphs(&std::mem::take(&mut run)));
                         render_block(child, block, blocks);
                     }
                     None => push_inline_element(child, Emphasis::default(), &mut run),
@@ -333,7 +369,7 @@ fn collect_blocks(container: ElementRef, blocks: &mut Vec<String>) {
             _ => {}
         }
     }
-    blocks.extend(finish_line(&run));
+    blocks.extend(finish_paragraphs(&run));
 }
 
 /// Markdown blocks of `container`'s content, in document order; empty blocks are dropped.
@@ -404,6 +440,47 @@ mod tests {
 
         // Assert
         assert_eq!(blocks, vec!["Uno", "Dos", "suelto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_single_line_break_reads_as_a_space() -> Result<()> {
+        // Act
+        let blocks = render("<p>Uno<br>dos</p>suelto<br>texto")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["Uno dos", "suelto texto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_double_line_break_separates_paragraphs() -> Result<()> {
+        // Act
+        let blocks = render("<div>Uno<br><br>Dos<br> <br>Tres<br></div><p>A<br><br>B</p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["Uno", "Dos", "Tres", "A", "B"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_double_line_break_inside_bold_marks_each_paragraph() -> Result<()> {
+        // Act
+        let blocks = render("<div><strong>Decreto 1<br><br> DECTO-1<br></strong><br> Texto</div>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["**Decreto 1**", "**DECTO-1**", "Texto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_line_break_in_heading_and_cell_reads_as_a_space() -> Result<()> {
+        // Act
+        let blocks = render("<h2>Capítulo<br><br>I</h2><table><tr><td>A<br>B</td></tr></table>")?;
+
+        // Assert
+        assert_eq!(blocks[0], "## Capítulo I");
+        assert!(blocks[1].contains("A B"));
         Ok(())
     }
 
