@@ -23,6 +23,13 @@ fn check_page(page_index: usize, total_pages: usize, row_count: usize) -> Result
     }
 }
 
+/// Page cap from `--max-pages`; no flag means no cap.
+fn page_cap(max_pages: Option<u32>) -> usize {
+    max_pages.map_or(usize::MAX, |pages| {
+        usize::try_from(pages).unwrap_or(usize::MAX)
+    })
+}
+
 /// Walks the results pages of a search (at most `max_pages`), printing each law as a JSON line;
 /// returns the row count. `url_for_page` takes a 0-based page index. The total page count comes
 /// from the first page.
@@ -79,9 +86,12 @@ async fn run_search(
 }
 
 pub(crate) async fn run_query_provinces(client: &Client, args: &ProvinceArgs) -> Result<()> {
-    let written = run_search(client, Some(&args.province), usize::MAX, |page_index| {
-        search_url(args, page_index + 1)
-    })
+    let written = run_search(
+        client,
+        Some(&args.province),
+        page_cap(args.max_pages),
+        |page_index| search_url(args, page_index + 1),
+    )
     .await?;
     if written == 0 {
         tracing::warn!(
@@ -93,8 +103,7 @@ pub(crate) async fn run_query_provinces(client: &Client, args: &ProvinceArgs) ->
 }
 
 pub(crate) async fn run_query_national(client: &Client, args: &NationalArgs) -> Result<()> {
-    let max_pages = usize::try_from(args.max_pages).unwrap_or(usize::MAX);
-    let written = run_search(client, None, max_pages, |page_index| {
+    let written = run_search(client, None, page_cap(args.max_pages), |page_index| {
         national_search_url(&args.filters, page_index)
     })
     .await?;
@@ -181,6 +190,13 @@ mod tests {
             "{message}"
         );
         Ok(())
+    }
+
+    #[test]
+    fn page_cap_without_flag_is_unlimited() {
+        // Act / Assert
+        assert_eq!(page_cap(None), usize::MAX);
+        assert_eq!(page_cap(Some(20)), 20);
     }
 
     #[test]

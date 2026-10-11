@@ -6,7 +6,7 @@ use clap::builder::PossibleValuesParser;
 use clap::{Args, Parser, Subcommand, value_parser};
 
 use crate::model::Jurisdiccion;
-use crate::site::{DEFAULT_MAX_PAGES, LAW_TYPES};
+use crate::site::LAW_TYPES;
 
 /// Scraper for provincial laws published on argentina.gob.ar/normativa.
 #[derive(Debug, Parser)]
@@ -94,6 +94,9 @@ pub struct ProvinceArgs {
     /// Keywords for "Buscá por palabras clave", e.g. "impuesto tasa".
     #[arg(long, value_parser = non_empty_trimmed)]
     pub(crate) query: Option<String>,
+    /// Stop after this many result pages (50 rows each, one crawl delay per page); no limit if omitted.
+    #[arg(long, value_parser = value_parser!(u32).range(1..))]
+    pub(crate) max_pages: Option<u32>,
 }
 
 /// Arguments of `query national`: the form filters plus a crawl cap.
@@ -101,9 +104,9 @@ pub struct ProvinceArgs {
 pub struct NationalArgs {
     #[command(flatten)]
     pub(crate) filters: NationalFilters,
-    /// Stop after this many result pages (50 rows each, one crawl delay per page).
-    #[arg(long, default_value_t = DEFAULT_MAX_PAGES, value_parser = value_parser!(u32).range(1..))]
-    pub(crate) max_pages: u32,
+    /// Stop after this many result pages (50 rows each, one crawl delay per page); no limit if omitted.
+    #[arg(long, value_parser = value_parser!(u32).range(1..))]
+    pub(crate) max_pages: Option<u32>,
 }
 
 /// clap parser for free-text filters: trims, and rejects empty values so they can't pass for a filter.
@@ -319,6 +322,7 @@ mod tests {
                     from_date: Some("2015-01-01".to_owned()),
                     to_date: Some("2015-12-31".to_owned()),
                     query: Some("impuesto".to_owned()),
+                    max_pages: None,
                 }
         ));
     }
@@ -432,7 +436,7 @@ mod tests {
         assert!(matches!(
             cli,
             Ok(Cli { command: Command::Query { scope: QueryScope::National(args) } })
-                if args.max_pages == DEFAULT_MAX_PAGES && args.filters == NationalFilters {
+                if args.max_pages.is_none() && args.filters == NationalFilters {
                     law_type: Some("resoluciones".to_owned()),
                     law_number: Some(5911),
                     year: Some(2026),
@@ -484,7 +488,7 @@ mod tests {
     }
 
     #[test]
-    fn cli_query_national_max_pages_flag_overrides_default() {
+    fn cli_query_national_max_pages_flag_sets_the_cap() {
         // Act
         let cli = Cli::try_parse_from([
             "argentina-normativa-cli",
@@ -500,7 +504,7 @@ mod tests {
         assert!(matches!(
             cli,
             Ok(Cli { command: Command::Query { scope: QueryScope::National(args) } })
-                if args.max_pages == 3
+                if args.max_pages == Some(3)
         ));
     }
 

@@ -45,10 +45,6 @@ pub(crate) const LAW_TYPES: &[&str] = &[
     "recomendaciones",
 ];
 
-// Default for `query national --max-pages`: a lone broad filter (`--law-type decretos`) is thousands of
-// rows, and every page costs a crawl delay.
-pub(crate) const DEFAULT_MAX_PAGES: u32 = 20;
-
 // robots.txt asks for `Crawl-delay: 10`.
 pub(crate) const CRAWL_DELAY: Duration = Duration::from_secs(10);
 
@@ -235,6 +231,7 @@ mod tests {
             from_date: None,
             to_date: None,
             query: None,
+            max_pages: None,
         }
     }
 
