@@ -119,8 +119,10 @@ fn split_paragraphs(text: &str) -> Vec<String> {
         if segment.trim().is_empty() {
             paragraphs.push(std::mem::take(&mut current));
         } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
             current.push_str(segment);
-            current.push(' ');
         }
     }
     paragraphs.push(current);
@@ -516,6 +518,16 @@ mod tests {
 
         // Assert
         assert_eq!(blocks, vec!["**Decreto 1 DECTO-1** y *a b*"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_bold_keeps_punctuation_that_follows_it_attached() -> Result<()> {
+        // Act
+        let blocks = render("<p><strong>ARTICULO 10 ter</strong>: Modos <em>(nota)</em>.</p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["**ARTICULO 10 ter**: Modos *(nota)*."]);
         Ok(())
     }
 
