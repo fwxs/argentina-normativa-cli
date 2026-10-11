@@ -33,8 +33,9 @@ pub enum Command {
         /// Jurisdiction segment of the law url.
         #[arg(long)]
         jurisdiction: Jurisdiccion,
-        /// Law slug, last segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel"
-        /// (provincial) or "norma-431079" (nacional).
+        /// Law slug, last segment of the law url, e.g.
+        /// "ley-11035-123456789-0abc-defg-373-0000svorpyel" (provincial)
+        /// or "norma-431079" (nacional).
         #[arg(long)]
         law: String,
         /// Markdown file for the law text; defaults to `<law>.md` in the current directory.

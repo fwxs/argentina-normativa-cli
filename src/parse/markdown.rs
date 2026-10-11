@@ -7,8 +7,9 @@ use scraper::{ElementRef, Node};
 
 use super::collapse_whitespace;
 
-// Stands for a `<br>` in inline text. It is not whitespace, so trimming around emphasis keeps it; two
-// of them in a row end a paragraph (see `finish_paragraphs`), a lone one reads as a space.
+// Stands for a `<br>` in inline text. It is not whitespace, so trimming around emphasis keeps it;
+// two of them in a row end a paragraph (see `finish_paragraphs`), a lone one reads as a space.
+// `escape_inline` drops it from page text, so only a real `<br>` produces it.
 const LINE_BREAK: char = '\u{E000}';
 
 #[derive(Clone, Copy)]
