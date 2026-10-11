@@ -178,16 +178,16 @@ pub(crate) async fn fetch_html(client: &Client, url: &str) -> Result<String, Fet
     }
 }
 
+/// A local HTTP server and client for tests that must not reach the real site.
 #[cfg(test)]
-mod tests {
-    use pretty_assertions::assert_eq;
+pub(crate) mod test_support {
+    use anyhow::Result;
+    use reqwest::Client;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
-    use super::*;
-
     /// Answers consecutive connections with the canned `responses` and returns the url to request.
-    async fn serve(responses: Vec<&'static str>) -> Result<String> {
+    pub(crate) async fn serve(responses: Vec<impl AsRef<str> + Send + 'static>) -> Result<String> {
         let listener = TcpListener::bind("127.0.0.1:0").await?;
         let url = format!("http://{}/", listener.local_addr()?);
         tokio::spawn(async move {
@@ -197,11 +197,24 @@ mod tests {
                 };
                 let mut request = [0_u8; 1024];
                 let _ = stream.read(&mut request).await;
-                let _ = stream.write_all(response.as_bytes()).await;
+                let _ = stream.write_all(response.as_ref().as_bytes()).await;
             }
         });
         Ok(url)
     }
+
+    pub(crate) fn test_client() -> Result<Client> {
+        Ok(Client::builder().no_proxy().build()?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+    use tokio::net::TcpListener;
+
+    use super::test_support::{serve, test_client};
+    use super::*;
 
     fn status_error(status: StatusCode, retry_after: Option<Duration>) -> FetchError {
         FetchError::Status {
@@ -213,10 +226,6 @@ mod tests {
 
     const SERVICE_UNAVAILABLE: &str =
         "HTTP/1.1 503 Service Unavailable\r\ncontent-length: 0\r\n\r\n";
-
-    fn test_client() -> Result<Client> {
-        Ok(Client::builder().no_proxy().build()?)
-    }
 
     #[tokio::test]
     async fn fetch_html_not_found_returns_typed_not_found_status() -> Result<()> {
