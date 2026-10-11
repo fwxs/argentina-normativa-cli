@@ -45,7 +45,7 @@ pub(crate) async fn run_fetch(
     let law_text = fetch_html(client, &format!("{SITE_ORIGIN}{law_text_path}"))
         .await
         .map_err(describe_not_found("law text not found; check `--law`"))?;
-    tokio::fs::write(&text_file, parse_law_text(&law_text)?)
+    tokio::fs::write(&text_file, parse_law_text(&law_text, jurisdiccion)?)
         .await
         .with_context(|| format!("failed to save {}", text_file.display()))?;
 

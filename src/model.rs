@@ -5,9 +5,14 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub(crate) struct LawDetails {
-    pub(crate) provincia: String,
+    // Only provincial laws carry a province.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provincia: Option<String>,
     pub(crate) jurisdiccion: Jurisdiccion,
     pub(crate) titulo: String,
+    // Issuing agency; only national norms carry it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) organismo: Option<String>,
     pub(crate) ley: String,
     pub(crate) estado: Option<String>,
     pub(crate) url: String,
@@ -51,6 +56,32 @@ impl Jurisdiccion {
         match self {
             Self::Provincial => "provincial",
             Self::Nacional => "nacional",
+        }
+    }
+
+    /// Text pages a law page of this jurisdiction can link to, in the order they are preferred.
+    pub(crate) fn text_kinds(self) -> &'static [LawTextKind] {
+        match self {
+            Self::Provincial => &[LawTextKind::Updated],
+            Self::Nacional => &[LawTextKind::Updated, LawTextKind::Original],
+        }
+    }
+}
+
+/// The versions of a law text the site serves, each on its own page below the law page.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum LawTextKind {
+    /// Current text, with every later amendment applied.
+    Updated,
+    /// Text as first published.
+    Original,
+}
+
+impl LawTextKind {
+    pub(crate) fn path_suffix(self) -> &'static str {
+        match self {
+            Self::Updated => "/actualizacion",
+            Self::Original => "/texto",
         }
     }
 }
