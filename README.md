@@ -136,6 +136,10 @@ Output:
 ```
 
 An existing file at the output path is overwritten. A slug the site does not know exits with `law not found`.
+`--output` is checked before any request is sent, so a missing directory fails immediately.
+
+> **Changed from the PDF version:** `fetch` now saves Markdown instead of a PDF, and the `pdf` key of the JSON
+> output is now `archivo`. A script reading `.pdf` (for example `jq -r .pdf`) gets `null`; read `.archivo` instead.
 
 ## Output and logging
 
@@ -150,6 +154,9 @@ argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto"
 
 - The site's `robots.txt` asks for a 10 second crawl delay, and the scraper waits that long between result pages
   and between the two requests of `fetch`. A query with many pages therefore takes a while.
+- Rate limiting (429), gateway errors (502-504) and timeouts are retried up to twice, waiting at least the crawl
+  delay. If a query still fails halfway, the error says which page it stopped on and how many rows were already
+  printed, so partial output is never mistaken for a complete result.
 - Provincial search is limited to the `Ley` norm type, which is the only type the site accepts for provinces.
 - A province name that matches nothing prints no results and logs a warning; check the spelling (including
   accents) against `list`.
