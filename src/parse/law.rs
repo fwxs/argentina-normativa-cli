@@ -106,7 +106,11 @@ fn parse_law_text_link(document: &Html, jurisdiccion: Jurisdiccion, ley: &str) -
         .find(|path| hrefs.contains(&path.as_str()))
         .cloned()
         .ok_or_else(|| {
-            anyhow!("unexpected \"Ver norma\" links {hrefs:?}, expected one of {expected:?}")
+            // The page's own hrefs are untrusted and unbounded, so only their count is reported.
+            anyhow!(
+                "no \"Ver norma\" link matches the expected paths {expected:?} ({} found)",
+                hrefs.len()
+            )
         })
 }
 
@@ -297,6 +301,27 @@ mod tests {
             let result = text_link(&html, Jurisdiccion::Provincial, "ley-1");
             assert!(result.is_err(), "accepted `{href}`");
         }
+    }
+
+    #[test]
+    fn parse_law_text_link_mismatch_error_does_not_echo_page_hrefs() {
+        // Arrange
+        let links = (0..500)
+            .map(|index| format!(r#"<a class="btn btn-primary" href="/evil-{index}">x</a>"#))
+            .collect::<String>();
+
+        // Act
+        let result = text_link(&links, Jurisdiccion::Nacional, "norma-1");
+
+        // Assert
+        let message = result
+            .err()
+            .map(|error| error.to_string())
+            .unwrap_or_default();
+        assert!(message.contains("/normativa/nacional/norma-1/texto"));
+        assert!(message.contains("500 found"));
+        assert!(!message.contains("evil"));
+        assert!(message.len() < 300, "{} bytes", message.len());
     }
 
     #[test]
