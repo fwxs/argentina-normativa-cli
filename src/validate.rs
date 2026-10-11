@@ -16,11 +16,12 @@ pub(crate) fn validate_law_slug(ley: &str) -> Result<()> {
     Ok(())
 }
 
-/// National norms are addressed as `norma-<id>`, e.g. `norma-431079`.
+/// National norms are addressed as `norma-<id>`, e.g. `norma-431079`. That is a subset of the slug
+/// characters, so it is also safe in a url path and a file name.
 fn validate_national_slug(ley: &str) -> Result<()> {
     let has_id = ley
         .strip_prefix("norma-")
-        .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()));
+        .is_some_and(|id| !id.is_empty() && id.chars().all(|character| character.is_ascii_digit()));
     if !has_id {
         bail!("invalid law `{ley}`: a national norm is `norma-` followed by its number");
     }
@@ -32,9 +33,9 @@ pub(crate) fn validate_fetch(
     ley: &str,
     output: Option<&Path>,
 ) -> Result<()> {
-    validate_law_slug(ley)?;
-    if jurisdiccion == Jurisdiccion::Nacional {
-        validate_national_slug(ley)?;
+    match jurisdiccion {
+        Jurisdiccion::Provincial => validate_law_slug(ley)?,
+        Jurisdiccion::Nacional => validate_national_slug(ley)?,
     }
     output.map_or(Ok(()), validate_output_path)
 }
@@ -75,7 +76,9 @@ pub(crate) fn days_in_month(year: u32, month: u32) -> u32 {
 /// The site only accepts ISO dates in the url (`dd-mm-aaaa`, the form's placeholder, finds nothing).
 pub(crate) fn validate_iso_date(flag: &str, value: &str) -> Result<()> {
     let parts: Vec<&str> = value.split('-').collect();
-    let is_valid = value.chars().all(|c| c.is_ascii_digit() || c == '-')
+    let is_valid = value
+        .chars()
+        .all(|character| character.is_ascii_digit() || character == '-')
         && match parts.as_slice() {
             [year, month, day] if year.len() == 4 && month.len() == 2 && day.len() == 2 => {
                 match (
