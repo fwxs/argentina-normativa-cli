@@ -16,14 +16,25 @@ pub(crate) fn validate_law_slug(ley: &str) -> Result<()> {
     Ok(())
 }
 
+/// National norms are addressed as `norma-<id>`, e.g. `norma-431079`.
+fn validate_national_slug(ley: &str) -> Result<()> {
+    let has_id = ley
+        .strip_prefix("norma-")
+        .is_some_and(|id| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()));
+    if !has_id {
+        bail!("invalid law `{ley}`: a national norm is `norma-` followed by its number");
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_fetch(
     jurisdiccion: Jurisdiccion,
     ley: &str,
     output: Option<&Path>,
 ) -> Result<()> {
-    match jurisdiccion {
-        Jurisdiccion::Provincial => validate_law_slug(ley)?,
-        Jurisdiccion::Nacional => bail!("fetching `nacional` laws is not supported yet"),
+    validate_law_slug(ley)?;
+    if jurisdiccion == Jurisdiccion::Nacional {
+        validate_national_slug(ley)?;
     }
     output.map_or(Ok(()), validate_output_path)
 }
@@ -331,12 +342,20 @@ mod tests {
     }
 
     #[test]
-    fn validate_fetch_nacional_returns_unsupported_error() {
-        // Act
-        let result = validate_fetch(Jurisdiccion::Nacional, "ley-1", None);
+    fn validate_fetch_nacional_norma_slug_is_accepted() {
+        // Act / Assert
+        assert!(validate_fetch(Jurisdiccion::Nacional, "norma-431079", None).is_ok());
+    }
 
-        // Assert
-        assert!(result.is_err_and(|error| error.to_string().contains("not supported yet")));
+    #[test]
+    fn validate_fetch_nacional_other_slugs_are_rejected() {
+        // Act / Assert
+        for invalid in ["ley-1", "norma-", "norma-12a", "norma431079", "../x", ""] {
+            assert!(
+                validate_fetch(Jurisdiccion::Nacional, invalid, None).is_err(),
+                "accepted `{invalid}`"
+            );
+        }
     }
 
     const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
