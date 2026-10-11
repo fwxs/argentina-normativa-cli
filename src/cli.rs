@@ -77,7 +77,7 @@ pub enum QueryScope {
 #[derive(Debug, Args, PartialEq)]
 pub struct ProvinceArgs {
     /// Province name exactly as printed by `list provinces`.
-    #[arg(long)]
+    #[arg(long, value_parser = non_empty_trimmed)]
     pub(crate) province: String,
     /// "Número": law number, digits only.
     #[arg(long, value_parser = value_parser!(u64))]
@@ -241,6 +241,23 @@ mod tests {
             "argentina-normativa-cli",
             "query",
             "provinces",
+            "--query",
+            "impuesto",
+        ]);
+
+        // Assert
+        assert!(cli.is_err());
+    }
+
+    #[test]
+    fn cli_query_provinces_empty_province_fails() {
+        // Act
+        let cli = Cli::try_parse_from([
+            "argentina-normativa-cli",
+            "query",
+            "provinces",
+            "--province",
+            " ",
             "--query",
             "impuesto",
         ]);
