@@ -10,11 +10,6 @@ use crate::http::fetch_html;
 use crate::parse::parse_results;
 use crate::site::{CRAWL_DELAY, national_search_url, search_url};
 
-/// Pages to walk: all of them, unless the cap is lower.
-fn pages_to_fetch(total_pages: usize, max_pages: usize) -> usize {
-    total_pages.min(max_pages)
-}
-
 /// Rejects a page that cannot be right, so a broken page counter or an error page that answered
 /// 200 can't end the crawl early with exit code 0. Only the first page may be empty, and only
 /// when the counter says there is nothing.
@@ -58,7 +53,7 @@ async fn run_search(
         let total_pages = results.total_pages;
         check_page(page_index, total_pages, results.rows.len()).with_context(page_context)?;
         if page_index == 0 {
-            last_page = pages_to_fetch(total_pages, max_pages);
+            last_page = total_pages.min(max_pages);
             if last_page < total_pages {
                 tracing::warn!(
                     fetching = last_page,
@@ -211,14 +206,5 @@ mod tests {
         // Act / Assert
         assert!(check_page(1, 4, 0).is_err());
         assert!(check_page(1, 4, 50).is_ok());
-    }
-
-    #[test]
-    fn pages_to_fetch_caps_total_pages() {
-        // Act / Assert
-        assert_eq!(pages_to_fetch(212, 20), 20);
-        assert_eq!(pages_to_fetch(3, 20), 3);
-        assert_eq!(pages_to_fetch(0, 20), 0);
-        assert_eq!(pages_to_fetch(5, usize::MAX), 5);
     }
 }
