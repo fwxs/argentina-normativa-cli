@@ -28,12 +28,14 @@ pub enum Command {
         #[command(subcommand)]
         scope: QueryScope,
     },
-    /// Print a law's province, title and status as JSON and save its text as Markdown.
+    /// Print a law's details as JSON and save its text as Markdown.
     Fetch {
-        /// Jurisdiction segment of the law url (only `provincial` is supported for now).
+        /// Jurisdiction segment of the law url.
         #[arg(long)]
         jurisdiction: Jurisdiccion,
-        /// Law slug, last segment of the law url, e.g. "ley-11035-123456789-0abc-defg-373-0000svorpyel".
+        /// Law slug, last segment of the law url, e.g.
+        /// "ley-11035-123456789-0abc-defg-373-0000svorpyel" (provincial)
+        /// or "norma-431079" (nacional).
         #[arg(long)]
         law: String,
         /// Markdown file for the law text; defaults to `<law>.md` in the current directory.

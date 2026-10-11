@@ -16,6 +16,18 @@ pub(crate) fn validate_law_slug(ley: &str) -> Result<()> {
     Ok(())
 }
 
+/// National norms are addressed as `norma-<id>`, e.g. `norma-431079`. That is a subset of the slug
+/// characters, so it is also safe in a url path and a file name.
+fn validate_national_slug(ley: &str) -> Result<()> {
+    let has_id = ley
+        .strip_prefix("norma-")
+        .is_some_and(|id| !id.is_empty() && id.chars().all(|character| character.is_ascii_digit()));
+    if !has_id {
+        bail!("invalid law `{ley}`: a national norm is `norma-` followed by its number");
+    }
+    Ok(())
+}
+
 pub(crate) fn validate_fetch(
     jurisdiccion: Jurisdiccion,
     ley: &str,
@@ -23,7 +35,7 @@ pub(crate) fn validate_fetch(
 ) -> Result<()> {
     match jurisdiccion {
         Jurisdiccion::Provincial => validate_law_slug(ley)?,
-        Jurisdiccion::Nacional => bail!("fetching `nacional` laws is not supported yet"),
+        Jurisdiccion::Nacional => validate_national_slug(ley)?,
     }
     output.map_or(Ok(()), validate_output_path)
 }
@@ -64,7 +76,9 @@ pub(crate) fn days_in_month(year: u32, month: u32) -> u32 {
 /// The site only accepts ISO dates in the url (`dd-mm-aaaa`, the form's placeholder, finds nothing).
 pub(crate) fn validate_iso_date(flag: &str, value: &str) -> Result<()> {
     let parts: Vec<&str> = value.split('-').collect();
-    let is_valid = value.chars().all(|c| c.is_ascii_digit() || c == '-')
+    let is_valid = value
+        .chars()
+        .all(|character| character.is_ascii_digit() || character == '-')
         && match parts.as_slice() {
             [year, month, day] if year.len() == 4 && month.len() == 2 && day.len() == 2 => {
                 match (
@@ -331,12 +345,20 @@ mod tests {
     }
 
     #[test]
-    fn validate_fetch_nacional_returns_unsupported_error() {
-        // Act
-        let result = validate_fetch(Jurisdiccion::Nacional, "ley-1", None);
+    fn validate_fetch_nacional_norma_slug_is_accepted() {
+        // Act / Assert
+        assert!(validate_fetch(Jurisdiccion::Nacional, "norma-431079", None).is_ok());
+    }
 
-        // Assert
-        assert!(result.is_err_and(|error| error.to_string().contains("not supported yet")));
+    #[test]
+    fn validate_fetch_nacional_other_slugs_are_rejected() {
+        // Act / Assert
+        for invalid in ["ley-1", "norma-", "norma-12a", "norma431079", "../x", ""] {
+            assert!(
+                validate_fetch(Jurisdiccion::Nacional, invalid, None).is_err(),
+                "accepted `{invalid}`"
+            );
+        }
     }
 
     const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");

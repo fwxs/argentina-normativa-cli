@@ -5,7 +5,7 @@ use std::time::Duration;
 use anyhow::{Context, Result};
 use url::Url;
 
-use crate::model::Jurisdiccion;
+use crate::model::{Jurisdiccion, LawTextKind};
 use crate::{NationalFilters, ProvinceArgs};
 
 pub(crate) const SITE_HOST: &str = "www.argentina.gob.ar";
@@ -49,8 +49,6 @@ pub(crate) const LAW_TYPES: &[&str] = &[
 // rows, and every page costs a crawl delay.
 pub(crate) const DEFAULT_MAX_PAGES: u32 = 20;
 
-const LAW_TEXT_PATH_SUFFIX: &str = "/actualizacion";
-
 // robots.txt asks for `Crawl-delay: 10`.
 pub(crate) const CRAWL_DELAY: Duration = Duration::from_secs(10);
 
@@ -78,11 +76,12 @@ pub(crate) fn law_url(jurisdiccion: Jurisdiccion, ley: &str) -> String {
     )
 }
 
-/// Site path of the page holding the law text, which the law page's "Ver norma" button links to.
-pub(crate) fn law_text_path(jurisdiccion: Jurisdiccion, ley: &str) -> String {
+/// Site path of a page holding the law text, which a button of the law page links to.
+pub(crate) fn law_text_path(jurisdiccion: Jurisdiccion, ley: &str, kind: LawTextKind) -> String {
     format!(
-        "{SEARCH_PATH}/{}/{ley}{LAW_TEXT_PATH_SUFFIX}",
-        jurisdiccion.path_segment()
+        "{SEARCH_PATH}/{}/{ley}{}",
+        jurisdiccion.path_segment(),
+        kind.path_suffix()
     )
 }
 
@@ -203,12 +202,21 @@ mod tests {
     }
 
     #[test]
-    fn law_text_path_provincial_law_appends_actualizacion() {
+    fn law_text_path_updated_text_appends_actualizacion() {
         // Act
-        let path = law_text_path(Jurisdiccion::Provincial, "ley-1");
+        let path = law_text_path(Jurisdiccion::Provincial, "ley-1", LawTextKind::Updated);
 
         // Assert
         assert_eq!(path, "/normativa/provincial/ley-1/actualizacion");
+    }
+
+    #[test]
+    fn law_text_path_original_text_appends_texto() {
+        // Act
+        let path = law_text_path(Jurisdiccion::Nacional, "norma-1", LawTextKind::Original);
+
+        // Assert
+        assert_eq!(path, "/normativa/nacional/norma-1/texto");
     }
 
     #[test]

@@ -108,21 +108,22 @@ argentina-normativa-cli query national --query "impuesto" --agency "MINISTERIO D
 | `--max-pages <n>` | Stop after `n` result pages (50 rows each, 10 s apart). Default 20; a warning on stderr says when the result was truncated. |
 
 Output lines have the same shape as the provincial ones, with `"provincia": null`, `"jurisdiccion": "nacional"`, an
-extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`. `fetch` does not support national norms yet.
+extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`, which `fetch --jurisdiction nacional --law` accepts.
 
 ### `fetch`
 
-Opens a law page, prints its province, title and status as JSON, then follows the "Ver norma" link and saves the
+Opens a law page, prints its details as JSON, then follows the "Ver norma" link and saves the
 law text as Markdown (the title as a heading, then one paragraph per block of the law).
 
 ```bash
 argentina-normativa-cli fetch --jurisdiction provincial --law ley-14709-123456789-0abc-defg-907-4100bvorpyel
+argentina-normativa-cli fetch --jurisdiction nacional --law norma-431079
 ```
 
 | Option | Description |
 | --- | --- |
-| `--jurisdiction <provincial\|nacional>` | Jurisdiction segment of the law URL. Only `provincial` is supported for now; `nacional` exits with an error. |
-| `--law <ley>` | Law slug, the last segment of the law URL. Letters, digits and dashes only. |
+| `--jurisdiction <provincial\|nacional>` | Jurisdiction segment of the law URL. |
+| `--law <ley>` | Law slug, the last segment of the law URL. Letters, digits and dashes only; for `nacional` it is `norma-` followed by the number, e.g. `norma-431079`. |
 | `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist. |
 
 Output:
@@ -138,6 +139,23 @@ Output:
   "archivo": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.md"
 }
 ```
+
+For a national norm the JSON has no `provincia`, but an `organismo` (issuing agency):
+
+```json
+{
+  "jurisdiccion": "nacional",
+  "titulo": "Decreto 1160/2026",
+  "organismo": "PODER EJECUTIVO NACIONAL (P.E.N.)",
+  "ley": "norma-431079",
+  "estado": null,
+  "url": "https://www.argentina.gob.ar/normativa/nacional/norma-431079",
+  "archivo": "norma-431079.md"
+}
+```
+
+The saved national text is the updated text when the site offers one (norms that were modified later), otherwise the
+original text.
 
 An existing file at the output path is overwritten. A slug the site does not know exits with `law not found`.
 `--output` is checked before any request is sent, so a missing directory fails immediately.

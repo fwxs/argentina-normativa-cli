@@ -7,6 +7,11 @@ use scraper::{ElementRef, Node};
 
 use super::collapse_whitespace;
 
+// Stands for a `<br>` in inline text. It is not whitespace, so trimming around emphasis keeps it;
+// two of them in a row end a paragraph (see `finish_paragraphs`), a lone one reads as a space.
+// `escape_inline` drops it from page text, so only a real `<br>` produces it.
+const LINE_BREAK: char = '\u{E000}';
+
 #[derive(Clone, Copy)]
 enum Block {
     /// Only groups other blocks: its children are rendered in place.
@@ -59,11 +64,15 @@ fn is_hidden(element: ElementRef) -> bool {
     ) || element.value().classes().any(|class| class == "sr-only")
 }
 
-/// Escapes the characters Markdown would read as inline markup.
+/// Escapes the characters Markdown would read as inline markup and drops the line-break stand-in.
 pub(super) fn escape_inline(text: &str) -> String {
     text.chars().fold(
         String::with_capacity(text.len()),
         |mut escaped, character| {
+            // Page text must never carry the `<br>` stand-in, or it would be read as a line break.
+            if character == LINE_BREAK {
+                return escaped;
+            }
             if matches!(character, '\\' | '*' | '_' | '`' | '[' | ']' | '<') {
                 escaped.push('\\');
             }
@@ -89,9 +98,44 @@ fn escape_block_start(text: &str) -> String {
     text.to_owned()
 }
 
-/// A finished one-line block: whitespace collapsed and block-level markup escaped.
+/// Inline text on one line, for what Markdown keeps on one line (list items, headings, table
+/// cells): every line break, single or double, and every run of whitespace becomes one space.
+/// Only flowing text keeps paragraph breaks, see `finish_paragraphs`.
+fn single_line(text: &str) -> String {
+    collapse_whitespace(&text.replace(LINE_BREAK, " "))
+}
+
+/// A finished one-line block: on one line and with block-level markup escaped.
 fn finish_line(text: &str) -> Option<String> {
-    Some(escape_block_start(&collapse_whitespace(text))).filter(|line| !line.is_empty())
+    Some(escape_block_start(&single_line(text))).filter(|line| !line.is_empty())
+}
+
+/// The unfinished paragraphs of inline text: two or more line breaks in a row separate them, a
+/// lone line break reads as a space. Blank paragraphs are dropped.
+fn split_paragraphs(text: &str) -> Vec<String> {
+    let mut paragraphs = Vec::new();
+    let mut current = String::new();
+    for segment in text.split(LINE_BREAK) {
+        if segment.trim().is_empty() {
+            paragraphs.push(std::mem::take(&mut current));
+        } else {
+            if !current.is_empty() {
+                current.push(' ');
+            }
+            current.push_str(segment);
+        }
+    }
+    paragraphs.push(current);
+    paragraphs.retain(|paragraph| !paragraph.trim().is_empty());
+    paragraphs
+}
+
+/// The finished blocks of inline text: two or more line breaks in a row separate paragraphs.
+fn finish_paragraphs(text: &str) -> Vec<String> {
+    split_paragraphs(text)
+        .iter()
+        .filter_map(|paragraph| finish_line(paragraph))
+        .collect()
 }
 
 /// Splits `text` into the single space (if any) before it, the text itself and the space after.
@@ -122,6 +166,26 @@ fn wrap_emphasis(inner: &str, marker: &str) -> String {
     format!("{leading}{marker}{core}{marker}{trailing}")
 }
 
+/// `inner` wrapped in `marker`, one run per paragraph because emphasis can't span paragraphs.
+/// A lone line break stays inside its run. Breaks and spaces at either edge are kept outside the
+/// markers, as the other half of a break may sit next to the element.
+fn wrap_paragraphs(inner: &str, marker: &str) -> String {
+    let is_edge = |character: char| character == LINE_BREAK || character.is_whitespace();
+    let core = inner.trim_matches(is_edge);
+    if core.is_empty() {
+        return inner.to_owned();
+    }
+    let leading = &inner[..inner.len() - inner.trim_start_matches(is_edge).len()];
+    let trailing = &inner[inner.trim_end_matches(is_edge).len()..];
+    let paragraph_break = format!("{LINE_BREAK}{LINE_BREAK}");
+    let wrapped = split_paragraphs(core)
+        .iter()
+        .map(|paragraph| wrap_emphasis(paragraph, marker))
+        .collect::<Vec<_>>()
+        .join(&paragraph_break);
+    format!("{leading}{wrapped}{trailing}")
+}
+
 fn push_inline_element(element: ElementRef, emphasis: Emphasis, out: &mut String) {
     if is_hidden(element) {
         return;
@@ -145,13 +209,13 @@ fn push_inline_element(element: ElementRef, emphasis: Emphasis, out: &mut String
         _ => (emphasis, None),
     };
     if tag == "br" {
-        out.push(' ');
+        out.push(LINE_BREAK);
         return;
     }
     let mut inner = String::new();
     push_inline_children(element, child_emphasis, &mut inner);
     match marker {
-        Some(marker) => out.push_str(&wrap_emphasis(&inner, marker)),
+        Some(marker) => out.push_str(&wrap_paragraphs(&inner, marker)),
         // A block nested where only inline text is expected must not run into its neighbours.
         None if block_kind(tag).is_some() => {
             out.push(' ');
@@ -228,7 +292,7 @@ fn render_table(table: ElementRef) -> Option<String> {
         .map(|row| {
             row.child_elements()
                 .filter(|cell| matches!(cell.value().name(), "td" | "th"))
-                .map(|cell| collapse_whitespace(&inline_text(cell)).replace('|', r"\|"))
+                .map(|cell| single_line(&inline_text(cell)).replace('|', r"\|"))
                 .collect::<Vec<String>>()
         })
         .filter(|cells| cells.iter().any(|cell| !cell.is_empty()))
@@ -282,9 +346,9 @@ fn quote_lines(blocks: &[String]) -> String {
 fn render_block(element: ElementRef, block: Block, blocks: &mut Vec<String>) {
     match block {
         Block::Container => collect_blocks(element, blocks),
-        Block::Paragraph => blocks.extend(finish_line(&inline_text(element))),
+        Block::Paragraph => blocks.extend(finish_paragraphs(&inline_text(element))),
         Block::Heading(level) => {
-            let heading = collapse_whitespace(&inline_text(element));
+            let heading = single_line(&inline_text(element));
             if !heading.is_empty() {
                 blocks.push(format!("{} {heading}", "#".repeat(level)));
             }
@@ -324,7 +388,7 @@ fn collect_blocks(container: ElementRef, blocks: &mut Vec<String>) {
                 }
                 match block_kind(child.value().name()) {
                     Some(block) => {
-                        blocks.extend(finish_line(&std::mem::take(&mut run)));
+                        blocks.extend(finish_paragraphs(&std::mem::take(&mut run)));
                         render_block(child, block, blocks);
                     }
                     None => push_inline_element(child, Emphasis::default(), &mut run),
@@ -333,7 +397,7 @@ fn collect_blocks(container: ElementRef, blocks: &mut Vec<String>) {
             _ => {}
         }
     }
-    blocks.extend(finish_line(&run));
+    blocks.extend(finish_paragraphs(&run));
 }
 
 /// Markdown blocks of `container`'s content, in document order; empty blocks are dropped.
@@ -404,6 +468,97 @@ mod tests {
 
         // Assert
         assert_eq!(blocks, vec!["Uno", "Dos", "suelto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_page_text_with_the_break_sentinel_is_not_split() -> Result<()> {
+        // Act
+        let blocks = render("<p>a\u{E000}\u{E000}b</p><div>c\u{E000} \u{E000}d</div>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["ab", "c d"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_single_line_break_reads_as_a_space() -> Result<()> {
+        // Act
+        let blocks = render("<p>Uno<br>dos</p>suelto<br>texto")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["Uno dos", "suelto texto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_double_line_break_separates_paragraphs() -> Result<()> {
+        // Act
+        let blocks = render("<div>Uno<br><br>Dos<br> <br>Tres<br></div><p>A<br><br>B</p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["Uno", "Dos", "Tres", "A", "B"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_double_line_break_inside_bold_marks_each_paragraph() -> Result<()> {
+        // Act
+        let blocks = render("<div><strong>Decreto 1<br><br> DECTO-1<br></strong><br> Texto</div>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["**Decreto 1**", "**DECTO-1**", "Texto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_single_line_break_inside_bold_keeps_one_run() -> Result<()> {
+        // Act
+        let blocks = render("<p><strong>Decreto 1<br>DECTO-1</strong> y <em>a<br>b</em></p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["**Decreto 1 DECTO-1** y *a b*"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_bold_keeps_punctuation_that_follows_it_attached() -> Result<()> {
+        // Act
+        let blocks = render("<p><strong>ARTICULO 10 ter</strong>: Modos <em>(nota)</em>.</p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["**ARTICULO 10 ter**: Modos *(nota)*."]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_line_break_only_bold_is_dropped() -> Result<()> {
+        // Act
+        let blocks = render("<p>Uno<strong><br></strong>dos</p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["Uno dos"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_double_line_break_in_list_item_stays_on_one_line() -> Result<()> {
+        // Act
+        let blocks = render("<ul><li>A<br><br>B</li></ul>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["- A B"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_line_break_in_heading_and_cell_reads_as_a_space() -> Result<()> {
+        // Act
+        let blocks = render("<h2>Capítulo<br><br>I</h2><table><tr><td>A<br>B</td></tr></table>")?;
+
+        // Assert
+        assert_eq!(blocks[0], "## Capítulo I");
+        assert!(blocks[1].contains("A B"));
         Ok(())
     }
 

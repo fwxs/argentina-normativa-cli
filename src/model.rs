@@ -5,14 +5,27 @@ use serde::Serialize;
 
 #[derive(Debug, Serialize, PartialEq)]
 pub(crate) struct LawDetails {
-    pub(crate) provincia: String,
+    // Only provincial laws carry a province.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) provincia: Option<String>,
     pub(crate) jurisdiccion: Jurisdiccion,
     pub(crate) titulo: String,
+    // Issuing agency; only national norms carry it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) organismo: Option<String>,
     pub(crate) ley: String,
     pub(crate) estado: Option<String>,
     pub(crate) url: String,
     // File the law text was saved to.
     pub(crate) archivo: String,
+}
+
+/// What a law page gives: the details to print and where its law text page is.
+#[derive(Debug, PartialEq)]
+pub(crate) struct LawPage {
+    pub(crate) details: LawDetails,
+    // Site path of the law text page to fetch next.
+    pub(crate) text_path: String,
 }
 
 #[derive(Debug, Serialize, PartialEq)]
@@ -51,6 +64,24 @@ impl Jurisdiccion {
         match self {
             Self::Provincial => "provincial",
             Self::Nacional => "nacional",
+        }
+    }
+}
+
+/// The versions of a law text the site serves, each on its own page below the law page.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) enum LawTextKind {
+    /// Current text, with every later amendment applied.
+    Updated,
+    /// Text as first published.
+    Original,
+}
+
+impl LawTextKind {
+    pub(crate) fn path_suffix(self) -> &'static str {
+        match self {
+            Self::Updated => "/actualizacion",
+            Self::Original => "/texto",
         }
     }
 }
