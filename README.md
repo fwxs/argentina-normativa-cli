@@ -68,6 +68,7 @@ argentina-normativa-cli query provinces --province "Buenos Aires" --from-date 20
 | `--from-date <YYYY-MM-DD>` | "Publicación desde". |
 | `--to-date <YYYY-MM-DD>` | "Publicación hasta". |
 | `--query <keywords>` | Keywords for "Buscá por palabras clave". All words must match. |
+| `--max-pages <n>` | Stop after `n` result pages (50 rows each, 10 s apart). Without it every page is fetched, one per 10 s, so a broad filter can run for a long time; a warning on stderr says when the result was truncated. |
 
 Example line (wrapped for readability):
 
@@ -105,7 +106,7 @@ argentina-normativa-cli query national --query "impuesto" --agency "MINISTERIO D
 | `--from-date <YYYY-MM-DD>` | "Publicación desde". |
 | `--to-date <YYYY-MM-DD>` | "Publicación hasta". |
 | `--query <keywords>` | "Buscá por palabras clave". |
-| `--max-pages <n>` | Stop after `n` result pages (50 rows each, 10 s apart). Default 20; a warning on stderr says when the result was truncated. |
+| `--max-pages <n>` | Stop after `n` result pages (50 rows each, 10 s apart). Without it every page is fetched, one per 10 s; a warning on stderr says when the result was truncated. |
 
 Output lines have the same shape as the provincial ones, with `"provincia": null`, `"jurisdiccion": "nacional"`, an
 extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`, which `fetch --jurisdiction nacional --law` accepts.
