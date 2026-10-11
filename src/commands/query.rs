@@ -100,6 +100,61 @@ mod tests {
     use pretty_assertions::assert_eq;
 
     use super::*;
+    use crate::http::test_support::{html_response, serve, test_client};
+
+    /// A national results page with one row, in the markup `parse_results` reads.
+    fn results_page(total_pages: usize, row_number: usize) -> String {
+        html_response(&format!(
+            r#"<div class="infoleg-search-results-count">2 normas encontradas en {total_pages} páginas</div>
+            <div><table><tbody><tr><td data-label="Normativa">
+            <a href="/normativa/nacional/norma-{row_number}">Decreto {row_number}/2026</a>
+            </td></tr></tbody></table></div>"#
+        ))
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_search_two_pages_returns_the_rows_of_both() -> Result<()> {
+        // Arrange
+        let url = serve(vec![results_page(2, 1), results_page(2, 2)]).await?;
+
+        // Act
+        let written = run_search(&test_client()?, None, usize::MAX, |_| Ok(url.clone())).await?;
+
+        // Assert
+        assert_eq!(written, 2);
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_search_max_pages_one_requests_only_the_first_page() -> Result<()> {
+        // Arrange: the server answers a single connection, so a request for page 2 would fail.
+        let url = serve(vec![results_page(2, 1)]).await?;
+
+        // Act
+        let written = run_search(&test_client()?, None, 1, |_| Ok(url.clone())).await?;
+
+        // Assert
+        assert_eq!(written, 1);
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_search_failing_second_page_reports_page_and_printed_rows() -> Result<()> {
+        // Arrange
+        let not_found = "HTTP/1.1 404 Not Found\r\ncontent-length: 0\r\nconnection: close\r\n\r\n";
+        let url = serve(vec![results_page(2, 1), not_found.to_owned()]).await?;
+
+        // Act
+        let result = run_search(&test_client()?, None, usize::MAX, |_| Ok(url.clone())).await;
+
+        // Assert
+        let message = format!("{:#}", result.expect_err("page 2 answers 404"));
+        assert!(
+            message.contains("failed on page 2; 1 rows were already printed"),
+            "{message}"
+        );
+        Ok(())
+    }
 
     #[test]
     fn pages_to_fetch_caps_total_pages() {

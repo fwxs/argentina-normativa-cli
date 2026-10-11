@@ -203,6 +203,14 @@ pub(crate) mod test_support {
         Ok(url)
     }
 
+    /// A 200 response that closes the connection, so each request opens a new one for `serve`.
+    pub(crate) fn html_response(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
     pub(crate) fn test_client() -> Result<Client> {
         Ok(Client::builder().no_proxy().build()?)
     }
