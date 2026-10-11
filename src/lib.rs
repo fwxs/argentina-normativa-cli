@@ -31,8 +31,10 @@ use crate::validate::{validate_fetch, validate_national, validate_provinces};
 pub async fn run(cli: Cli) -> Result<()> {
     match &cli.command {
         Command::Fetch {
-            jurisdiction, law, ..
-        } => validate_fetch(*jurisdiction, law)?,
+            jurisdiction,
+            law,
+            output,
+        } => validate_fetch(*jurisdiction, law, output.as_deref())?,
         Command::Query {
             scope: QueryScope::National(args),
         } => validate_national(&args.filters)?,

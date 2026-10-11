@@ -41,7 +41,8 @@ pub(crate) async fn run_fetch(
     // A second request follows, so honour the crawl delay.
     tokio::time::sleep(CRAWL_DELAY).await;
     let law_text = fetch_html(client, &format!("{SITE_ORIGIN}{law_text_path}")).await?;
-    std::fs::write(&text_file, parse_law_text(&law_text)?)
+    tokio::fs::write(&text_file, parse_law_text(&law_text)?)
+        .await
         .with_context(|| format!("failed to save {}", text_file.display()))?;
 
     writeln!(std::io::stdout(), "{}", serde_json::to_string(&details)?)

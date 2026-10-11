@@ -1,5 +1,7 @@
 //! Input checks that run before any request is sent.
 
+use std::path::Path;
+
 use anyhow::{Result, bail};
 
 use crate::cli::{NationalFilters, ProvinceArgs};
@@ -14,11 +16,37 @@ pub(crate) fn validate_law_slug(ley: &str) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn validate_fetch(jurisdiccion: Jurisdiccion, ley: &str) -> Result<()> {
+pub(crate) fn validate_fetch(
+    jurisdiccion: Jurisdiccion,
+    ley: &str,
+    output: Option<&Path>,
+) -> Result<()> {
     match jurisdiccion {
-        Jurisdiccion::Provincial => validate_law_slug(ley),
+        Jurisdiccion::Provincial => validate_law_slug(ley)?,
         Jurisdiccion::Nacional => bail!("fetching `nacional` laws is not supported yet"),
     }
+    output.map_or(Ok(()), validate_output_path)
+}
+
+/// `--output` is written only after two requests and a crawl delay, so check it can be written
+/// to first: it must not be a directory and its parent directory must exist.
+fn validate_output_path(output: &Path) -> Result<()> {
+    if output.is_dir() {
+        bail!("invalid output `{}`: it is a directory", output.display());
+    }
+    // A bare file name has an empty parent, which means the current directory.
+    let parent = output
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    if !parent.is_dir() {
+        bail!(
+            "invalid output `{}`: `{}` is not an existing directory",
+            output.display(),
+            parent.display()
+        );
+    }
+    Ok(())
 }
 
 /// `month` is 1..=12.
@@ -305,9 +333,67 @@ mod tests {
     #[test]
     fn validate_fetch_nacional_returns_unsupported_error() {
         // Act
-        let result = validate_fetch(Jurisdiccion::Nacional, "ley-1");
+        let result = validate_fetch(Jurisdiccion::Nacional, "ley-1", None);
 
         // Assert
         assert!(result.is_err_and(|error| error.to_string().contains("not supported yet")));
+    }
+
+    const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+    #[test]
+    fn validate_fetch_without_output_is_accepted() {
+        // Act / Assert
+        assert!(validate_fetch(Jurisdiccion::Provincial, "ley-1", None).is_ok());
+    }
+
+    #[test]
+    fn validate_fetch_bare_file_name_is_accepted() {
+        // Act / Assert
+        let output = Path::new("ley-1.md");
+        assert!(validate_fetch(Jurisdiccion::Provincial, "ley-1", Some(output)).is_ok());
+    }
+
+    #[test]
+    fn validate_fetch_file_in_existing_directory_is_accepted() {
+        // Arrange
+        let output = Path::new(MANIFEST_DIR).join("tests/fixtures/out.md");
+
+        // Act / Assert
+        assert!(validate_fetch(Jurisdiccion::Provincial, "ley-1", Some(&output)).is_ok());
+    }
+
+    #[test]
+    fn validate_fetch_missing_parent_directory_returns_error() {
+        // Arrange
+        let output = Path::new(MANIFEST_DIR).join("no-such-dir/out.md");
+
+        // Act
+        let result = validate_fetch(Jurisdiccion::Provincial, "ley-1", Some(&output));
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("not an existing directory")));
+    }
+
+    #[test]
+    fn validate_fetch_parent_is_a_file_returns_error() {
+        // Arrange
+        let output = Path::new(MANIFEST_DIR).join("Cargo.toml/out.md");
+
+        // Act / Assert
+        assert!(validate_fetch(Jurisdiccion::Provincial, "ley-1", Some(&output)).is_err());
+    }
+
+    #[test]
+    fn validate_fetch_output_is_a_directory_returns_error() {
+        // Act
+        let result = validate_fetch(
+            Jurisdiccion::Provincial,
+            "ley-1",
+            Some(Path::new(MANIFEST_DIR)),
+        );
+
+        // Assert
+        assert!(result.is_err_and(|error| error.to_string().contains("is a directory")));
     }
 }

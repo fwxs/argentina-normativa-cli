@@ -80,6 +80,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   (`is_allowed_redirect`), so neither the page nor a `Location` header can send the second GET elsewhere. The law text is
   `article.m-t-2` there, rendered to Markdown by `parse_law_text`. A missing slug is a real HTTP 404, which `run_fetch`
   reports as "law not found".
+  `--output` is checked in `validate_fetch` (parent directory exists, not a directory) before any request.
 
 ## Conventions
 
