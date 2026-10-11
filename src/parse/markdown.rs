@@ -97,17 +97,16 @@ fn escape_block_start(text: &str) -> String {
     text.to_owned()
 }
 
-/// Inline text on a single line: every line break becomes a space.
-fn flatten_breaks(text: &str) -> String {
-    text.replace(LINE_BREAK, " ")
+/// Inline text on one line, for what Markdown keeps on one line (list items, headings, table
+/// cells): every line break, single or double, and every run of whitespace becomes one space.
+/// Only flowing text keeps paragraph breaks, see `finish_paragraphs`.
+fn single_line(text: &str) -> String {
+    collapse_whitespace(&text.replace(LINE_BREAK, " "))
 }
 
-/// A finished one-line block: whitespace collapsed and block-level markup escaped.
+/// A finished one-line block: on one line and with block-level markup escaped.
 fn finish_line(text: &str) -> Option<String> {
-    Some(escape_block_start(&collapse_whitespace(&flatten_breaks(
-        text,
-    ))))
-    .filter(|line| !line.is_empty())
+    Some(escape_block_start(&single_line(text))).filter(|line| !line.is_empty())
 }
 
 /// The unfinished paragraphs of inline text: two or more line breaks in a row separate them, a
@@ -290,9 +289,7 @@ fn render_table(table: ElementRef) -> Option<String> {
         .map(|row| {
             row.child_elements()
                 .filter(|cell| matches!(cell.value().name(), "td" | "th"))
-                .map(|cell| {
-                    collapse_whitespace(&flatten_breaks(&inline_text(cell))).replace('|', r"\|")
-                })
+                .map(|cell| single_line(&inline_text(cell)).replace('|', r"\|"))
                 .collect::<Vec<String>>()
         })
         .filter(|cells| cells.iter().any(|cell| !cell.is_empty()))
@@ -348,7 +345,7 @@ fn render_block(element: ElementRef, block: Block, blocks: &mut Vec<String>) {
         Block::Container => collect_blocks(element, blocks),
         Block::Paragraph => blocks.extend(finish_paragraphs(&inline_text(element))),
         Block::Heading(level) => {
-            let heading = collapse_whitespace(&flatten_breaks(&inline_text(element)));
+            let heading = single_line(&inline_text(element));
             if !heading.is_empty() {
                 blocks.push(format!("{} {heading}", "#".repeat(level)));
             }
@@ -528,6 +525,16 @@ mod tests {
 
         // Assert
         assert_eq!(blocks, vec!["Uno dos"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_double_line_break_in_list_item_stays_on_one_line() -> Result<()> {
+        // Act
+        let blocks = render("<ul><li>A<br><br>B</li></ul>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["- A B"]);
         Ok(())
     }
 
