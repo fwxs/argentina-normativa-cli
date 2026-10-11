@@ -1,6 +1,7 @@
 //! Pure HTML parsers: they turn saved or live page HTML into data and never touch the network.
 
 mod law;
+mod markdown;
 mod national;
 mod results;
 

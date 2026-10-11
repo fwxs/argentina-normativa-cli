@@ -34,7 +34,7 @@ Modules, one domain each; unit tests sit in a `#[cfg(test)]` module at the botto
 
 - `cli` clap types (`Cli`, `Command`, `NationalFilters`, ...) · `model` shared types (`Jurisdiccion`, `Normativa`, ...)
 - `site` constants (`LAW_TYPES`, `CRAWL_DELAY`, ...) and url builders · `validate` input checks
-- `parse/{mod,results,law,national}` pure HTML parsers · `http` client + `fetch_html` · `output` stdout writers
+- `parse/{mod,results,law,national,markdown}` pure HTML parsers · `http` client + `fetch_html` · `output` stdout writers
 - `commands/{list,query,fetch}` one runner per subcommand
 
 Flow per subcommand: `lib::run` validates input **before** any request → `build_client` →
@@ -78,7 +78,8 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - `fetch` reads the `href` of `a.btn.btn-primary` ("Ver norma"), `<law path>/actualizacion`; `parse_law_text_link`
   only accepts exactly `law_text_path(<jurisdiction>, <law>)`, and the client only follows `https` redirects to the site's own host
   (`is_allowed_redirect`), so neither the page nor a `Location` header can send the second GET elsewhere. The law text is
-  `article.m-t-2` there, rendered to Markdown by `parse_law_text`. A missing slug is a real HTTP 404, which `run_fetch`
+  `article.m-t-2` there, rendered to Markdown by `parse_law_text`
+  (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials). A missing slug is a real HTTP 404, which `run_fetch`
   reports as "law not found".
   `--output` is checked in `validate_fetch` (parent directory exists, not a directory) before any request.
 
