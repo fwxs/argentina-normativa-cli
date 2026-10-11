@@ -1,6 +1,6 @@
 //! Input checks that run before any request is sent.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use anyhow::{Result, bail};
 
@@ -38,6 +38,11 @@ pub(crate) fn validate_fetch(
         Jurisdiccion::Nacional => validate_national_slug(ley)?,
     }
     output.map_or(Ok(()), validate_output_path)
+}
+
+/// Where the law text goes: `--output` when given, otherwise `<ley>.md` in the current directory.
+pub(crate) fn text_path(ley: &str, output: Option<&Path>) -> PathBuf {
+    output.map_or_else(|| PathBuf::from(format!("{ley}.md")), Path::to_path_buf)
 }
 
 /// `--output` is written only after two requests and a crawl delay, so check it can be written
@@ -363,6 +368,24 @@ mod tests {
     }
 
     const MANIFEST_DIR: &str = env!("CARGO_MANIFEST_DIR");
+
+    #[test]
+    fn text_path_without_output_defaults_to_law_slug() {
+        // Act
+        let path = text_path(LAW_SLUG, None);
+
+        // Assert
+        assert_eq!(path, PathBuf::from(format!("{LAW_SLUG}.md")));
+    }
+
+    #[test]
+    fn text_path_with_output_uses_given_path() {
+        // Act
+        let path = text_path(LAW_SLUG, Some(Path::new("laws/custom.md")));
+
+        // Assert
+        assert_eq!(path, PathBuf::from("laws/custom.md"));
+    }
 
     #[test]
     fn validate_fetch_without_output_is_accepted() {
