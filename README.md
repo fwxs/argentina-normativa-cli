@@ -127,33 +127,39 @@ argentina-normativa-cli fetch --jurisdiction nacional --law norma-431079
 | `--law <ley>` | Law slug, the last segment of the law URL. Letters, digits and dashes only; for `nacional` it is `norma-` followed by the number, e.g. `norma-431079`. |
 | `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist and the file must not. |
 
-Output:
+Output: the `jurisdiccion` and, under `metadata`, the fields of that jurisdiction.
 
 ```json
 {
-  "provincia": "Buenos Aires",
   "jurisdiccion": "provincial",
-  "titulo": "Ley 14709",
-  "ley": "ley-14709-123456789-0abc-defg-907-4100bvorpyel",
-  "estado": "Vigente, de alcance general",
-  "url": "https://www.argentina.gob.ar/normativa/provincial/ley-14709-123456789-0abc-defg-907-4100bvorpyel",
-  "archivo": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.md"
+  "metadata": {
+    "provincia": "Buenos Aires",
+    "titulo": "Ley 14709",
+    "ley": "ley-14709-123456789-0abc-defg-907-4100bvorpyel",
+    "estado": "Vigente, de alcance general",
+    "url": "https://www.argentina.gob.ar/normativa/provincial/ley-14709-123456789-0abc-defg-907-4100bvorpyel",
+    "archivo": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.md"
+  }
 }
 ```
 
-For a national norm the JSON has no `provincia`, but an `organismo` (issuing agency):
+A national norm has no `provincia` or `estado`, but an `organismo` (issuing agency):
 
 ```json
 {
   "jurisdiccion": "nacional",
-  "titulo": "Decreto 1160/2026",
-  "organismo": "PODER EJECUTIVO NACIONAL (P.E.N.)",
-  "ley": "norma-431079",
-  "estado": null,
-  "url": "https://www.argentina.gob.ar/normativa/nacional/norma-431079",
-  "archivo": "norma-431079.md"
+  "metadata": {
+    "titulo": "Decreto 1160/2026",
+    "organismo": "PODER EJECUTIVO NACIONAL (P.E.N.)",
+    "ley": "norma-431079",
+    "url": "https://www.argentina.gob.ar/normativa/nacional/norma-431079",
+    "archivo": "norma-431079.md"
+  }
 }
 ```
+
+> **Changed output shape:** the details used to be one flat object. Scripts must now read the fields under
+> `.metadata` (for example `jq -r .metadata.archivo`).
 
 The saved national text is the updated text when the site offers one (norms that were modified later), otherwise the
 original text.
