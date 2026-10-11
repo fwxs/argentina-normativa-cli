@@ -7,7 +7,7 @@ use scraper::{ElementRef, Html, Node};
 
 use super::{collapse_whitespace, selector};
 use crate::model::{Jurisdiccion, LawDetails};
-use crate::site::{law_url, parse_law_href};
+use crate::site::{law_text_path, law_url};
 
 const PROVINCE_SELECTOR: &str = ".label";
 
@@ -17,10 +17,7 @@ const LAW_STATUS_SELECTOR: &str = "p.m-b-0:nth-child(4) > small:nth-child(1)";
 
 const LAW_TEXT_SELECTOR: &str = "article.m-t-2";
 
-// The "Ver norma" button links to `<law path>/actualizacion`, the page holding the law text.
 const VIEW_LAW_BUTTON_SELECTOR: &str = "a.btn.btn-primary";
-
-const VIEW_LAW_PATH_SUFFIX: &str = "/actualizacion";
 
 pub(crate) fn parse_law_page(
     html: &str,
@@ -52,9 +49,13 @@ pub(crate) fn parse_law_page(
     })
 }
 
-/// Site path of the law text page, from the law page's "Ver norma" link. Only a law path plus
-/// `/actualizacion` is accepted, so the page can't point the next request anywhere else.
-pub(crate) fn parse_law_text_link(html: &str) -> Result<String> {
+/// Site path of the law text page, from the law page's "Ver norma" link. The link must be exactly
+/// the law text path of the requested law, so the page can't point the next request anywhere else.
+pub(crate) fn parse_law_text_link(
+    html: &str,
+    jurisdiccion: Jurisdiccion,
+    ley: &str,
+) -> Result<String> {
     let document = Html::parse_document(html);
     let Some(href) = document
         .select(&selector(VIEW_LAW_BUTTON_SELECTOR)?)
@@ -62,14 +63,11 @@ pub(crate) fn parse_law_text_link(html: &str) -> Result<String> {
     else {
         bail!("no \"Ver norma\" link on the law page");
     };
-    let is_law_text_path = href
-        .strip_suffix(VIEW_LAW_PATH_SUFFIX)
-        .and_then(parse_law_href)
-        .is_some();
-    if !is_law_text_path {
-        bail!("unexpected \"Ver norma\" link `{href}`");
+    let expected = law_text_path(jurisdiccion, ley);
+    if href != expected {
+        bail!("unexpected \"Ver norma\" link `{href}`, expected `{expected}`");
     }
-    Ok(href.to_owned())
+    Ok(expected)
 }
 
 /// Inline text of `element` with `<strong>`/`<b>` rendered as Markdown bold.
@@ -238,7 +236,7 @@ mod tests {
     #[test]
     fn parse_law_text_link_law_fixture_returns_actualizacion_href() -> Result<()> {
         // Act
-        let href = parse_law_text_link(LAW_FIXTURE)?;
+        let href = parse_law_text_link(LAW_FIXTURE, Jurisdiccion::Provincial, LAW_SLUG)?;
 
         // Assert
         assert_eq!(
@@ -249,23 +247,33 @@ mod tests {
     }
 
     #[test]
-    fn parse_law_text_link_foreign_href_returns_error() {
+    fn parse_law_text_link_unexpected_href_returns_error() {
         // Act / Assert
         for href in [
             "https://example.com/normativa/provincial/ley-1/actualizacion",
             "/normativa/provincial/ley-1",
             "/normativa/municipal/ley-1/actualizacion",
             "/normativa/provincial/a/b/actualizacion",
+            "/normativa/provincial/ley-1?next=x/actualizacion",
+            "/normativa/provincial/ley-1#frag/actualizacion",
+            "/normativa/provincial/../actualizacion",
+            "/normativa/nacional/ley-1/actualizacion",
+            "/normativa/provincial/ley-2/actualizacion",
         ] {
             let html = format!(r#"<a class="btn btn-primary" href="{href}">Ver norma</a>"#);
-            assert!(parse_law_text_link(&html).is_err(), "accepted `{href}`");
+            let result = parse_law_text_link(&html, Jurisdiccion::Provincial, "ley-1");
+            assert!(result.is_err(), "accepted `{href}`");
         }
     }
 
     #[test]
     fn parse_law_text_link_page_without_button_returns_error() {
         // Act
-        let result = parse_law_text_link("<html><body></body></html>");
+        let result = parse_law_text_link(
+            "<html><body></body></html>",
+            Jurisdiccion::Provincial,
+            "ley-1",
+        );
 
         // Assert
         assert!(result.is_err_and(|error| error.to_string().contains("no \"Ver norma\" link")));

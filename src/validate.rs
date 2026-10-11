@@ -4,10 +4,11 @@ use anyhow::{Result, bail};
 
 use crate::cli::{NationalFilters, ProvinceArgs};
 use crate::model::Jurisdiccion;
+use crate::site::is_law_slug;
 
 /// `--law` ends up in a url path and a file name, so only slug characters are allowed.
 pub(crate) fn validate_law_slug(ley: &str) -> Result<()> {
-    if ley.is_empty() || !ley.chars().all(|c| c.is_ascii_alphanumeric() || c == '-') {
+    if !is_law_slug(ley) {
         bail!("invalid law `{ley}`: expected a slug of letters, digits and dashes");
     }
     Ok(())

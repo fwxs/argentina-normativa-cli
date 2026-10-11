@@ -36,7 +36,7 @@ pub(crate) async fn run_fetch(
             }
         })?;
     let details = parse_law_page(&html, jurisdiccion, ley, &text_file)?;
-    let law_text_path = parse_law_text_link(&html)?;
+    let law_text_path = parse_law_text_link(&html, jurisdiccion, ley)?;
 
     // A second request follows, so honour the crawl delay.
     tokio::time::sleep(CRAWL_DELAY).await;
