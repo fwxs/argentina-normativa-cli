@@ -43,6 +43,8 @@ pub(crate) struct LawPage {
 
 #[derive(Debug, Serialize, PartialEq)]
 pub(crate) struct Normativa {
+    // Only provincial rows carry a province.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) provincia: Option<String>,
     pub(crate) jurisdiccion: Jurisdiccion,
     pub(crate) tipo_norma: String,
