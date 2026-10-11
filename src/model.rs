@@ -66,14 +66,6 @@ impl Jurisdiccion {
             Self::Nacional => "nacional",
         }
     }
-
-    /// Text pages a law page of this jurisdiction can link to, in the order they are preferred.
-    pub(crate) fn text_kinds(self) -> &'static [LawTextKind] {
-        match self {
-            Self::Provincial => &[LawTextKind::Updated],
-            Self::Nacional => &[LawTextKind::Updated, LawTextKind::Original],
-        }
-    }
 }
 
 /// The versions of a law text the site serves, each on its own page below the law page.

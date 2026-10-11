@@ -7,29 +7,49 @@ use scraper::Html;
 
 use super::markdown::{escape_inline, render_blocks};
 use super::{element_text, selector};
-use crate::model::{Jurisdiccion, LawDetails, LawPage};
+use crate::model::{Jurisdiccion, LawDetails, LawPage, LawTextKind};
 use crate::site::{law_text_path, law_url};
-
-const PROVINCE_SELECTOR: &str = ".label";
-
-// Issuing agency of a national norm, above its subtitle (`p.lead` without `m-b-0`).
-const AGENCY_SELECTOR: &str = "p.lead.m-b-0";
 
 const LAW_TITLE_SELECTOR: &str = "h1.h5";
 
-const LAW_STATUS_SELECTOR: &str = "p.m-b-0:nth-child(4) > small:nth-child(1)";
-
-const PROVINCIAL_LAW_TEXT_SELECTOR: &str = "article.m-t-2";
-
-// Holds the original and the updated text of a national norm alike.
-const NATIONAL_LAW_TEXT_SELECTOR: &str = "div.infoleg-norma-body";
-
 const VIEW_LAW_BUTTON_SELECTOR: &str = "a.btn.btn-primary";
 
-fn law_text_selector(jurisdiccion: Jurisdiccion) -> &'static str {
+/// What `fetch` reads from the law pages of one jurisdiction. This is the only place that differs
+/// per jurisdiction: a new one is a new arm in `layout`, which the compiler asks for.
+struct LawPageLayout {
+    /// Law text pages the law page can link to, the preferred one first.
+    text_kinds: &'static [LawTextKind],
+    /// The law text on a law text page.
+    text_selector: &'static str,
+    /// The province; the page is not a law page without it.
+    province_selector: Option<&'static str>,
+    /// The issuing agency.
+    agency_selector: Option<&'static str>,
+    status_selector: Option<&'static str>,
+}
+
+const PROVINCIAL_LAYOUT: LawPageLayout = LawPageLayout {
+    text_kinds: &[LawTextKind::Updated],
+    text_selector: "article.m-t-2",
+    province_selector: Some(".label"),
+    agency_selector: None,
+    status_selector: Some("p.m-b-0:nth-child(4) > small:nth-child(1)"),
+};
+
+const NATIONAL_LAYOUT: LawPageLayout = LawPageLayout {
+    text_kinds: &[LawTextKind::Updated, LawTextKind::Original],
+    // Holds the original and the updated text alike.
+    text_selector: "div.infoleg-norma-body",
+    province_selector: None,
+    // Above the subtitle (`p.lead` without `m-b-0`).
+    agency_selector: Some("p.lead.m-b-0"),
+    status_selector: None,
+};
+
+fn layout(jurisdiccion: Jurisdiccion) -> &'static LawPageLayout {
     match jurisdiccion {
-        Jurisdiccion::Provincial => PROVINCIAL_LAW_TEXT_SELECTOR,
-        Jurisdiccion::Nacional => NATIONAL_LAW_TEXT_SELECTOR,
+        Jurisdiccion::Provincial => &PROVINCIAL_LAYOUT,
+        Jurisdiccion::Nacional => &NATIONAL_LAYOUT,
     }
 }
 
@@ -59,19 +79,18 @@ fn parse_law_details(
             .next()
             .and_then(element_text))
     };
+    let optional_text_of =
+        |css: Option<&str>| -> Result<Option<String>> { css.map_or(Ok(None), text_of) };
+    let layout = layout(jurisdiccion);
     let Some(titulo) = text_of(LAW_TITLE_SELECTOR)? else {
         bail!("law not found: no title on the page; check `--law`");
     };
-    let (provincia, organismo, estado) = match jurisdiccion {
-        Jurisdiccion::Provincial => {
-            let Some(provincia) = text_of(PROVINCE_SELECTOR)? else {
-                bail!("law not found: no province on the page; check `--law`");
-            };
-            (Some(provincia), None, text_of(LAW_STATUS_SELECTOR)?)
-        }
-        // National pages have neither a province nor a status.
-        Jurisdiccion::Nacional => (None, text_of(AGENCY_SELECTOR)?, None),
-    };
+    let provincia = optional_text_of(layout.province_selector)?;
+    if layout.province_selector.is_some() && provincia.is_none() {
+        bail!("law not found: no province on the page; check `--law`");
+    }
+    let organismo = optional_text_of(layout.agency_selector)?;
+    let estado = optional_text_of(layout.status_selector)?;
     Ok(LawDetails {
         provincia,
         jurisdiccion,
@@ -87,7 +106,7 @@ fn parse_law_details(
 /// Site path of the law text page, from the law page's "Ver norma" links. The updated text is
 /// preferred over the original one when the page offers both. A link is only followed when it is
 /// exactly the law text path of the requested law, so the page can't point the next request
-/// anywhere else (and a text page the page doesn't link to, which would be a 404, is never asked for).
+/// anywhere else, and a text page the law page doesn't link to (a 404) is never asked for.
 fn parse_law_text_link(document: &Html, jurisdiccion: Jurisdiccion, ley: &str) -> Result<String> {
     let hrefs: Vec<&str> = document
         .select(&selector(VIEW_LAW_BUTTON_SELECTOR)?)
@@ -96,8 +115,8 @@ fn parse_law_text_link(document: &Html, jurisdiccion: Jurisdiccion, ley: &str) -
     if hrefs.is_empty() {
         bail!("no \"Ver norma\" link on the law page");
     }
-    let expected: Vec<String> = jurisdiccion
-        .text_kinds()
+    let expected: Vec<String> = layout(jurisdiccion)
+        .text_kinds
         .iter()
         .map(|&kind| law_text_path(jurisdiccion, ley, kind))
         .collect();
@@ -114,11 +133,11 @@ fn parse_law_text_link(document: &Html, jurisdiccion: Jurisdiccion, ley: &str) -
         })
 }
 
-/// A law text page (`<law url>/actualizacion` or `/texto`) as Markdown: the title as a heading, then one
-/// Markdown block per block of the law article.
+/// A law text page (`<law url>/actualizacion` or `/texto`) as Markdown: the title as a heading,
+/// then one Markdown block per block of the law article.
 pub(crate) fn parse_law_text(html: &str, jurisdiccion: Jurisdiccion) -> Result<String> {
     let document = Html::parse_document(html);
-    let text_selector = law_text_selector(jurisdiccion);
+    let text_selector = layout(jurisdiccion).text_selector;
     let Some(article) = document.select(&selector(text_selector)?).next() else {
         bail!("law text not found: no `{text_selector}` on the page");
     };

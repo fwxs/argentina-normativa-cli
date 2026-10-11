@@ -80,7 +80,8 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   least `CRAWL_DELAY` (doubling, honouring `Retry-After`, capped at 60 s). `query` rows are printed as pages arrive,
   so a failure reports which page it died on and how many rows were already printed.
 - `fetch` reads the `href`s of `a.btn.btn-primary` ("Ver norma"); `parse_law_text_link` only accepts exactly
-  `law_text_path(<jurisdiction>, <law>, kind)` for the kinds in `Jurisdiccion::text_kinds` (preferred first), and the client only
+  `law_text_path(<jurisdiction>, <law>, kind)` for the kinds in its `LawPageLayout` (`parse/law`, preferred first;
+  the one place with each jurisdiction's selectors), and the client only
   follows `https` redirects to the site's own host (`is_allowed_redirect`), so neither the page nor a `Location` header can
   send the second GET elsewhere. Provincial: `<law path>/actualizacion`, text in `article.m-t-2`. National: `/actualizacion`
   ("Ver texto actualizado") exists only for modified norms and is a real 404 otherwise, so it is used only when the page links it;
