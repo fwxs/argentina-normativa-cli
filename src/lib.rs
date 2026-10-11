@@ -1,6 +1,6 @@
 //! Scrapes "Normativas" from argentina.gob.ar/normativa with plain HTTP requests.
-//! `list` prints the provinces of the search form; `query provinces` prints matching provincial laws and
-//! `query national` national norms, as JSON lines;
+//! `list provinces` and `list national` print the values the search forms accept;
+//! `query provinces` prints matching provincial laws and `query national` national norms, as JSON lines;
 //! `fetch` prints one law's details as JSON and saves its text as Markdown.
 
 mod cli;
@@ -18,7 +18,7 @@ pub use crate::cli::{
     Cli, Command, ListScope, NationalArgs, NationalFilters, NationalList, ProvinceArgs, QueryScope,
 };
 use crate::commands::{
-    run_fetch, run_list, run_list_national, run_query_national, run_query_provinces,
+    run_fetch, run_list_national, run_list_provinces, run_query_national, run_query_provinces,
 };
 use crate::http::build_client;
 use crate::output::print_json_array;
@@ -40,10 +40,9 @@ pub async fn run(cli: Cli) -> Result<()> {
         } => validate_national(&args.filters)?,
         // Slugs are a local constant: answer without a request.
         Command::List {
-            scope:
-                Some(ListScope::National {
-                    what: NationalList::LawType,
-                }),
+            scope: ListScope::National {
+                what: NationalList::LawType,
+            },
         } => return print_json_array(LAW_TYPES, "law types"),
         Command::Query {
             scope: QueryScope::Provinces(args),
@@ -53,9 +52,11 @@ pub async fn run(cli: Cli) -> Result<()> {
 
     let client = build_client()?;
     match &cli.command {
-        Command::List { scope: None } => run_list(&client).await,
         Command::List {
-            scope: Some(ListScope::National { what }),
+            scope: ListScope::Provinces,
+        } => run_list_provinces(&client).await,
+        Command::List {
+            scope: ListScope::National { what },
         } => run_list_national(&client, *what).await,
         Command::Query {
             scope: QueryScope::Provinces(args),

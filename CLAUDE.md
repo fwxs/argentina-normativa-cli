@@ -17,7 +17,7 @@ cargo test --all                       # offline, fixture-based
 cargo test parse_law_page              # single test (substring match on the test name)
 cargo build --release                  # binary: target/release/argentina-normativa-cli
 
-argentina-normativa-cli list                                         # provinces as a JSON array
+argentina-normativa-cli list provinces                               # provinces as a JSON array
 argentina-normativa-cli list national <agencies|law-type|years>      # values for `query national` flags, JSON array
 argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto tasa"   # provincial, JSON lines
 argentina-normativa-cli query national --law-type decretos --year 2024 --query "impuesto"   # national, JSON lines
@@ -38,7 +38,7 @@ Modules, one domain each; unit tests sit in a `#[cfg(test)]` module at the botto
 - `commands/{list,query,fetch}` one runner per subcommand
 
 Flow per subcommand: `lib::run` validates input **before** any request → `build_client` →
-`run_list | run_query_provinces | run_query_national | run_fetch`, each taking `&reqwest::Client`.
+`run_list_provinces | run_list_national | run_query_provinces | run_query_national | run_fetch`, each taking `&reqwest::Client`.
 Keep items `pub(crate)` unless `main.rs` needs them.
 
 Parsing is kept pure and separate from fetching: `fetch_html` (GET, non-2xx is an error) returns HTML, and
@@ -72,7 +72,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   `form#infoleg-normativa-search-form` to avoid duplicates. `list national law-type` prints `LAW_TYPES`, no request.
   `query national` stops after `--max-pages` (default `DEFAULT_MAX_PAGES` = 20) and warns when truncated; provincial is uncapped.
 - `tipo_norma` is mandatory (empty/`todas`/`*` return nothing); provincial search is fixed to `Ley`.
-- `texto` is AND-semantics across words. Province names are exact, accented strings from `list` (e.g. `Córdoba`).
+- `texto` is AND-semantics across words. Province names are exact, accented strings from `list provinces` (e.g. `Córdoba`).
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
   requests of `fetch`. Don't remove it or parallelise requests.
 - `fetch_html` retries 429/502/503/504 and timeouts/connect errors up to 3 tries in total, sequentially, waiting at

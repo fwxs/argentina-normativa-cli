@@ -77,7 +77,7 @@ pub(crate) async fn run_query_provinces(client: &Client, args: &ProvinceArgs) ->
     if written == 0 {
         tracing::warn!(
             provincia = args.province.as_str(),
-            "no results; check the province name with `list` and the filters"
+            "no results; check the province name with `list provinces` and the filters"
         );
     }
     Ok(())

@@ -25,10 +25,14 @@ The binary is `target/release/argentina-normativa-cli`. The examples below assum
 
 ### `list`
 
-Prints the provinces of the "Elegí una provincia" select as a JSON array. Use these exact names with `query provinces`.
+Prints the values a search form accepts, as JSON arrays. Pick which with a subcommand: `provinces` or `national`.
+
+#### `list provinces`
+
+Prints the provinces of the "Elegí una provincia" select. Use these exact names with `query provinces`.
 
 ```bash
-argentina-normativa-cli list
+argentina-normativa-cli list provinces
 ```
 
 #### `list national`
@@ -58,7 +62,7 @@ argentina-normativa-cli query provinces --province "Buenos Aires" --from-date 20
 
 | Option | Description |
 | --- | --- |
-| `--province <name>` | Province name exactly as printed by `list` (required). |
+| `--province <name>` | Province name exactly as printed by `list provinces` (required). |
 | `--law-number <n>` | "Número": digits only. |
 | `--year <yyyy>` | "Año" (1853 or later). |
 | `--from-date <YYYY-MM-DD>` | "Publicación desde". |
@@ -159,7 +163,7 @@ argentina-normativa-cli query provinces --province "Córdoba" --query "impuesto"
   printed, so partial output is never mistaken for a complete result.
 - Provincial search is limited to the `Ley` norm type, which is the only type the site accepts for provinces.
 - A province name that matches nothing prints no results and logs a warning; check the spelling (including
-  accents) against `list`.
+  accents) against `list provinces`.
 
 ## Development
 
