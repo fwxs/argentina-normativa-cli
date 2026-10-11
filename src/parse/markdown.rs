@@ -110,19 +110,30 @@ fn finish_line(text: &str) -> Option<String> {
     .filter(|line| !line.is_empty())
 }
 
-/// The finished blocks of inline text: two or more line breaks in a row separate paragraphs.
-fn finish_paragraphs(text: &str) -> Vec<String> {
+/// The unfinished paragraphs of inline text: two or more line breaks in a row separate them, a
+/// lone line break reads as a space. Blank paragraphs are dropped.
+fn split_paragraphs(text: &str) -> Vec<String> {
     let mut paragraphs = Vec::new();
     let mut current = String::new();
     for segment in text.split(LINE_BREAK) {
-        if segment.trim().is_empty() && !current.is_empty() {
-            paragraphs.extend(finish_line(&std::mem::take(&mut current)));
+        if segment.trim().is_empty() {
+            paragraphs.push(std::mem::take(&mut current));
+        } else {
+            current.push_str(segment);
+            current.push(' ');
         }
-        current.push_str(segment);
-        current.push(' ');
     }
-    paragraphs.extend(finish_line(&current));
+    paragraphs.push(current);
+    paragraphs.retain(|paragraph| !paragraph.trim().is_empty());
     paragraphs
+}
+
+/// The finished blocks of inline text: two or more line breaks in a row separate paragraphs.
+fn finish_paragraphs(text: &str) -> Vec<String> {
+    split_paragraphs(text)
+        .iter()
+        .filter_map(|paragraph| finish_line(paragraph))
+        .collect()
 }
 
 /// Splits `text` into the single space (if any) before it, the text itself and the space after.
@@ -151,6 +162,26 @@ fn wrap_emphasis(inner: &str, marker: &str) -> String {
         return inner.to_owned();
     }
     format!("{leading}{marker}{core}{marker}{trailing}")
+}
+
+/// `inner` wrapped in `marker`, one run per paragraph because emphasis can't span paragraphs.
+/// A lone line break stays inside its run. Breaks and spaces at either edge are kept outside the
+/// markers, as the other half of a break may sit next to the element.
+fn wrap_paragraphs(inner: &str, marker: &str) -> String {
+    let is_edge = |character: char| character == LINE_BREAK || character.is_whitespace();
+    let core = inner.trim_matches(is_edge);
+    if core.is_empty() {
+        return inner.to_owned();
+    }
+    let leading = &inner[..inner.len() - inner.trim_start_matches(is_edge).len()];
+    let trailing = &inner[inner.trim_end_matches(is_edge).len()..];
+    let paragraph_break = format!("{LINE_BREAK}{LINE_BREAK}");
+    let wrapped = split_paragraphs(core)
+        .iter()
+        .map(|paragraph| wrap_emphasis(paragraph, marker))
+        .collect::<Vec<_>>()
+        .join(&paragraph_break);
+    format!("{leading}{wrapped}{trailing}")
 }
 
 fn push_inline_element(element: ElementRef, emphasis: Emphasis, out: &mut String) {
@@ -182,14 +213,7 @@ fn push_inline_element(element: ElementRef, emphasis: Emphasis, out: &mut String
     let mut inner = String::new();
     push_inline_children(element, child_emphasis, &mut inner);
     match marker {
-        // Emphasis can't span paragraphs, so each part between line breaks is marked on its own.
-        Some(marker) => out.push_str(
-            &inner
-                .split(LINE_BREAK)
-                .map(|part| wrap_emphasis(part, marker))
-                .collect::<Vec<_>>()
-                .join(&LINE_BREAK.to_string()),
-        ),
+        Some(marker) => out.push_str(&wrap_paragraphs(&inner, marker)),
         // A block nested where only inline text is expected must not run into its neighbours.
         None if block_kind(tag).is_some() => {
             out.push(' ');
@@ -484,6 +508,26 @@ mod tests {
 
         // Assert
         assert_eq!(blocks, vec!["**Decreto 1**", "**DECTO-1**", "Texto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_single_line_break_inside_bold_keeps_one_run() -> Result<()> {
+        // Act
+        let blocks = render("<p><strong>Decreto 1<br>DECTO-1</strong> y <em>a<br>b</em></p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["**Decreto 1 DECTO-1** y *a b*"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_line_break_only_bold_is_dropped() -> Result<()> {
+        // Act
+        let blocks = render("<p>Uno<strong><br></strong>dos</p>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["Uno dos"]);
         Ok(())
     }
 
