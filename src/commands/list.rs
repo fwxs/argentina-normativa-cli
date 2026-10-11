@@ -9,7 +9,7 @@ use crate::output::print_json_array;
 use crate::parse::{parse_agencies, parse_options, parse_years};
 use crate::site::{LAW_TYPES, SEARCH_PATH, SITE_ORIGIN};
 
-pub(crate) async fn run_list(client: &Client) -> Result<()> {
+pub(crate) async fn run_list_provinces(client: &Client) -> Result<()> {
     let html = fetch_html(
         client,
         &format!("{SITE_ORIGIN}{SEARCH_PATH}?jurisdiccion=provincial"),

@@ -18,10 +18,10 @@ pub struct Cli {
 
 #[derive(Debug, Subcommand)]
 pub enum Command {
-    /// Print the provinces of the "Elegí una provincia" select box as a JSON array.
+    /// Print the values a search form accepts as a JSON array: provinces or national filters.
     List {
         #[command(subcommand)]
-        scope: Option<ListScope>,
+        scope: ListScope,
     },
     /// Search laws as JSON lines on stdout: of one province (`provinces`) or national norms (`national`).
     Query {
@@ -44,6 +44,8 @@ pub enum Command {
 
 #[derive(Debug, Subcommand)]
 pub enum ListScope {
+    /// Provinces of the "Elegí una provincia" select box, for `query provinces --province`.
+    Provinces,
     /// Print the values the national search form accepts, as a JSON array.
     National {
         #[command(subcommand)]
@@ -72,7 +74,7 @@ pub enum QueryScope {
 /// Arguments of `query provinces`: the province plus the form filters; at least one filter is required.
 #[derive(Debug, Args, PartialEq)]
 pub struct ProvinceArgs {
-    /// Province name exactly as printed by `list`.
+    /// Province name exactly as printed by `list provinces`.
     #[arg(long)]
     pub(crate) province: String,
     /// "Número": law number, digits only.
@@ -146,17 +148,28 @@ mod tests {
     const LAW_SLUG: &str = "ley-14709-123456789-0abc-defg-907-4100bvorpyel";
 
     #[test]
-    fn cli_list_without_arguments_parses() {
+    fn cli_list_provinces_parses() {
         // Act
-        let cli = Cli::try_parse_from(["argentina-normativa-cli", "list"]);
+        let cli = Cli::try_parse_from(["argentina-normativa-cli", "list", "provinces"]);
 
         // Assert
         assert!(matches!(
             cli,
             Ok(Cli {
-                command: Command::List { scope: None }
+                command: Command::List {
+                    scope: ListScope::Provinces
+                }
             })
         ));
+    }
+
+    #[test]
+    fn cli_list_without_subcommand_fails() {
+        // Act
+        let cli = Cli::try_parse_from(["argentina-normativa-cli", "list"]);
+
+        // Assert
+        assert!(cli.is_err());
     }
 
     #[test]
@@ -178,7 +191,7 @@ mod tests {
                     cli,
                     Ok(Cli {
                         command: Command::List {
-                            scope: Some(ListScope::National { what })
+                            scope: ListScope::National { what }
                         }
                     }) if what == expected
                 ),
