@@ -18,6 +18,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = "2"
 
 [dev-dependencies]
-# `net` and `io-util` serve canned responses to the HTTP tests.
-tokio = { version = "1", features = ["net", "io-util"] }
+# `net` and `io-util` serve canned responses to the HTTP tests; `test-util` pauses the clock so
+# retry waits don't slow them down.
+tokio = { version = "1", features = ["net", "io-util", "test-util"] }
 pretty_assertions = "1"

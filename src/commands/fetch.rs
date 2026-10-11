@@ -65,6 +65,7 @@ mod tests {
         let error = FetchError::Status {
             url: "https://example.com/x".to_owned(),
             status: reqwest::StatusCode::NOT_FOUND,
+            retry_after: None,
         };
 
         // Act
@@ -81,6 +82,7 @@ mod tests {
         let error = FetchError::Status {
             url: "https://example.com/x".to_owned(),
             status: reqwest::StatusCode::BAD_GATEWAY,
+            retry_after: None,
         };
 
         // Act

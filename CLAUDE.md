@@ -75,6 +75,9 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - `texto` is AND-semantics across words. Province names are exact, accented strings from `list` (e.g. `Córdoba`).
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
   requests of `fetch`. Don't remove it or parallelise requests.
+- `fetch_html` retries 429/502/503/504 and timeouts/connect errors up to 3 tries in total, sequentially, waiting at
+  least `CRAWL_DELAY` (doubling, honouring `Retry-After`, capped at 60 s). `query` rows are printed as pages arrive,
+  so a failure reports which page it died on and how many rows were already printed.
 - `fetch` reads the `href` of `a.btn.btn-primary` ("Ver norma"), `<law path>/actualizacion`; `parse_law_text_link`
   only accepts exactly `law_text_path(<jurisdiction>, <law>)`, and the client only follows `https` redirects to the site's own host
   (`is_allowed_redirect`), so neither the page nor a `Location` header can send the second GET elsewhere. The law text is

@@ -31,8 +31,17 @@ async fn run_search(
         if page_index > 0 {
             tokio::time::sleep(CRAWL_DELAY).await;
         }
-        let html = fetch_html(client, &url_for_page(page_index)?).await?;
-        let results = parse_results(&html, provincia)?;
+        // Rows are printed as they arrive, so say where a failure cut the output short.
+        let page_context = || {
+            format!(
+                "failed on page {}; {written} rows were already printed",
+                page_index + 1
+            )
+        };
+        let html = fetch_html(client, &url_for_page(page_index)?)
+            .await
+            .with_context(page_context)?;
+        let results = parse_results(&html, provincia).with_context(page_context)?;
         let total_pages = results.total_pages;
         if page_index == 0 {
             last_page = pages_to_fetch(total_pages, max_pages);
