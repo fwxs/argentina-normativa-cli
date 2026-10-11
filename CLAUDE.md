@@ -79,8 +79,8 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   only accepts exactly `law_text_path(<jurisdiction>, <law>)`, and the client only follows `https` redirects to the site's own host
   (`is_allowed_redirect`), so neither the page nor a `Location` header can send the second GET elsewhere. The law text is
   `article.m-t-2` there, rendered to Markdown by `parse_law_text`
-  (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials). A missing slug is a real HTTP 404, which `run_fetch`
-  reports as "law not found".
+  (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials). A missing slug is a real HTTP 404 (`FetchError::Status`, see `http`), which `run_fetch`
+  reports as "law not found" ("law text not found" for the second GET).
   `--output` is checked in `validate_fetch` (parent directory exists, not a directory) before any request.
 
 ## Conventions

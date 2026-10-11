@@ -22,11 +22,11 @@ pub(crate) async fn run_list(client: &Client) -> Result<()> {
 }
 
 async fn fetch_national_form(client: &Client) -> Result<String> {
-    fetch_html(
+    Ok(fetch_html(
         client,
         &format!("{SITE_ORIGIN}{SEARCH_PATH}?jurisdiccion=nacional"),
     )
-    .await
+    .await?)
 }
 
 /// Lists of the national search form. `LawType` is a local constant (`run` answers it without
