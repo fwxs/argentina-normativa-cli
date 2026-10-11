@@ -155,6 +155,7 @@ mod tests {
             from_date: None,
             to_date: None,
             query: None,
+            max_pages: None,
         }
     }
 

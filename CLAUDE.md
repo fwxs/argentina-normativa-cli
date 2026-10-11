@@ -71,7 +71,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   `/normativa/nacional/norma-<id>` and the issuing agency is the `p.small` in the Normativa cell.
   The national page has two forms with a `dependencia` select (1690 agencies each); `list national` scopes to
   `form#infoleg-normativa-search-form` to avoid duplicates. `list national law-type` prints `LAW_TYPES`, no request.
-  `query national` stops after `--max-pages` (default `DEFAULT_MAX_PAGES` = 20) and warns when truncated; provincial is uncapped.
+  `query` (both) stops after the optional `--max-pages` and warns when truncated; without it, it is uncapped.
 - `tipo_norma` is mandatory (empty/`todas`/`*` return nothing); provincial search is fixed to `Ley`.
 - `texto` is AND-semantics across words. Province names are exact, accented strings from `list provinces` (e.g. `Córdoba`).
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
