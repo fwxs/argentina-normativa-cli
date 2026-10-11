@@ -38,7 +38,7 @@ pub enum Command {
         /// or "norma-431079" (nacional).
         #[arg(long)]
         law: String,
-        /// Markdown file for the law text; defaults to `<law>.md` in the current directory.
+        /// Markdown file for the law text; defaults to `<law>.md` in the current directory. Must not exist.
         #[arg(long, value_name = "FILE_PATH")]
         output: Option<PathBuf>,
     },
