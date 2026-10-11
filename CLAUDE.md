@@ -81,16 +81,16 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
   so a failure reports which page it died on and how many rows were already printed.
 - `fetch` reads the `href`s of `a.btn.btn-primary` ("Ver norma"); `parse_law_text_link` only accepts exactly
   `law_text_path(<jurisdiction>, <law>, kind)` for the kinds in its `LawPageLayout` (`parse/law`, preferred first;
-  the one place with each jurisdiction's selectors), and the client only
+  it and the detail selectors beside it are the one place with each jurisdiction's selectors), and the client only
   follows `https` redirects to the site's own host (`is_allowed_redirect`), so neither the page nor a `Location` header can
   send the second GET elsewhere. Provincial: `<law path>/actualizacion`, text in `article.m-t-2`. National: `/actualizacion`
   ("Ver texto actualizado") exists only for modified norms and is a real 404 otherwise, so it is used only when the page links it;
   else `/texto` ("Ver norma original"). National text is in `div.infoleg-norma-body`, details have no province/status but an
-  `organismo` (`p.lead.m-b-0`). The text is rendered to Markdown by `parse_law_text`
+  `organismo` (`p.lead.m-b-0`). `fetch` prints `LawDetails`, an enum that nests each jurisdiction's fields under `metadata`. The text is rendered to Markdown by `parse_law_text`
   (`parse/markdown`: block walker for paragraphs, headings, lists, tables; escapes Markdown specials; one `<br>` is a space,
   two in a row end the paragraph, which national texts rely on). A missing slug is a real HTTP 404 (`FetchError::Status`, see `http`), which `run_fetch`
   reports as "law not found" ("law text not found" for the second GET).
-  `--output` is checked in `validate_fetch` (parent directory exists, not a directory) before any request.
+  `--output` (or the default `<ley>.md`) is checked in `validate_fetch` (parent directory exists, not a directory, file does not exist: never overwritten) before any request.
 
 ## Conventions
 

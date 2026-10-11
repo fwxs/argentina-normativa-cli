@@ -1,7 +1,7 @@
 //! `fetch`: prints one law's details and saves its text as Markdown.
 
 use std::io::Write;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use anyhow::{Context, Result};
 use reqwest::Client;
@@ -10,11 +10,7 @@ use crate::http::{FetchError, fetch_html};
 use crate::model::Jurisdiccion;
 use crate::parse::{parse_law_page, parse_law_text};
 use crate::site::{CRAWL_DELAY, SITE_ORIGIN, law_url};
-
-/// Where the law text goes: `--output` when given, otherwise `<ley>.md` in the current directory.
-fn text_path(ley: &str, output: Option<&Path>) -> PathBuf {
-    output.map_or_else(|| PathBuf::from(format!("{ley}.md")), Path::to_path_buf)
-}
+use crate::validate::text_path;
 
 /// A 404 means the slug is unknown to the site; any other failure is reported as it is.
 fn describe_not_found(message: &'static str) -> impl FnOnce(FetchError) -> anyhow::Error {
@@ -93,25 +89,5 @@ mod tests {
 
         // Assert
         assert!(!described.to_string().contains("law not found"));
-    }
-
-    const LAW_SLUG: &str = "ley-14709-123456789-0abc-defg-907-4100bvorpyel";
-
-    #[test]
-    fn text_path_without_output_defaults_to_law_slug() {
-        // Act
-        let path = text_path(LAW_SLUG, None);
-
-        // Assert
-        assert_eq!(path, PathBuf::from(format!("{LAW_SLUG}.md")));
-    }
-
-    #[test]
-    fn text_path_with_output_uses_given_path() {
-        // Act
-        let path = text_path(LAW_SLUG, Some(Path::new("laws/custom.md")));
-
-        // Assert
-        assert_eq!(path, PathBuf::from("laws/custom.md"));
     }
 }

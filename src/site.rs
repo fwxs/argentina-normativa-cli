@@ -3,7 +3,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use url::Url;
+use reqwest::Url;
 
 use crate::model::{Jurisdiccion, LawTextKind};
 use crate::{NationalFilters, ProvinceArgs};

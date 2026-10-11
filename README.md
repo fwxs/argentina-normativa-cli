@@ -1,11 +1,12 @@
 # argentina-normativa-cli
 
-Command-line scraper for the provincial laws published on
+Command-line scraper for the provincial laws and national norms published on
 [argentina.gob.ar/normativa](https://www.argentina.gob.ar/normativa). It can:
 
-- list the provinces available in the search form,
-- search the laws (`Ley`) of a province by keyword,
-- save the text of a single law as Markdown.
+- list the provinces, and the agencies, law types and years of the national search form,
+- search the laws (`Ley`) of a province by keyword and filters,
+- search national norms (laws, decrees, resolutions, ...) by type, number, year, agency, dates and keyword,
+- save the text of a single provincial or national law as Markdown.
 
 ## Requirements
 
@@ -108,7 +109,7 @@ argentina-normativa-cli query national --query "impuesto" --agency "MINISTERIO D
 | `--query <keywords>` | "Buscá por palabras clave". |
 | `--max-pages <n>` | Stop after `n` result pages (50 rows each, 10 s apart). Without it every page is fetched, one per 10 s; a warning on stderr says when the result was truncated. |
 
-Output lines have the same shape as the provincial ones, with `"provincia": null`, `"jurisdiccion": "nacional"`, an
+Output lines have the same shape as the provincial ones, without `provincia`, with `"jurisdiccion": "nacional"`, an
 extra `organismo` (issuing agency) and a `ley` slug like `norma-431078`, which `fetch --jurisdiction nacional --law` accepts.
 
 ### `fetch`
@@ -125,41 +126,47 @@ argentina-normativa-cli fetch --jurisdiction nacional --law norma-431079
 | --- | --- |
 | `--jurisdiction <provincial\|nacional>` | Jurisdiction segment of the law URL. |
 | `--law <ley>` | Law slug, the last segment of the law URL. Letters, digits and dashes only; for `nacional` it is `norma-` followed by the number, e.g. `norma-431079`. |
-| `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist. |
+| `--output <file_path>` | Where to write the Markdown. Defaults to `<ley>.md` in the current directory. The parent directory must exist and the file must not. |
 
-Output:
+Output: the `jurisdiccion` and, under `metadata`, the fields of that jurisdiction.
 
 ```json
 {
-  "provincia": "Buenos Aires",
   "jurisdiccion": "provincial",
-  "titulo": "Ley 14709",
-  "ley": "ley-14709-123456789-0abc-defg-907-4100bvorpyel",
-  "estado": "Vigente, de alcance general",
-  "url": "https://www.argentina.gob.ar/normativa/provincial/ley-14709-123456789-0abc-defg-907-4100bvorpyel",
-  "archivo": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.md"
+  "metadata": {
+    "provincia": "Buenos Aires",
+    "titulo": "Ley 14709",
+    "ley": "ley-14709-123456789-0abc-defg-907-4100bvorpyel",
+    "estado": "Vigente, de alcance general",
+    "url": "https://www.argentina.gob.ar/normativa/provincial/ley-14709-123456789-0abc-defg-907-4100bvorpyel",
+    "archivo": "ley-14709-123456789-0abc-defg-907-4100bvorpyel.md"
+  }
 }
 ```
 
-For a national norm the JSON has no `provincia`, but an `organismo` (issuing agency):
+A national norm has no `provincia` or `estado`, but an `organismo` (issuing agency):
 
 ```json
 {
   "jurisdiccion": "nacional",
-  "titulo": "Decreto 1160/2026",
-  "organismo": "PODER EJECUTIVO NACIONAL (P.E.N.)",
-  "ley": "norma-431079",
-  "estado": null,
-  "url": "https://www.argentina.gob.ar/normativa/nacional/norma-431079",
-  "archivo": "norma-431079.md"
+  "metadata": {
+    "titulo": "Decreto 1160/2026",
+    "organismo": "PODER EJECUTIVO NACIONAL (P.E.N.)",
+    "ley": "norma-431079",
+    "url": "https://www.argentina.gob.ar/normativa/nacional/norma-431079",
+    "archivo": "norma-431079.md"
+  }
 }
 ```
+
+> **Changed output shape:** the details used to be one flat object. Scripts must now read the fields under
+> `.metadata` (for example `jq -r .metadata.archivo`).
 
 The saved national text is the updated text when the site offers one (norms that were modified later), otherwise the
 original text.
 
-An existing file at the output path is overwritten. A slug the site does not know exits with `law not found`.
-`--output` is checked before any request is sent, so a missing directory fails immediately.
+An existing file at the output path is never overwritten: `fetch` fails before any request, and you delete the file to fetch again. A slug the site does not know exits with `law not found`.
+`--output` (or the default `<ley>.md`) is checked before any request is sent, so a missing directory or an existing file fails immediately.
 
 > **Changed from the PDF version:** `fetch` now saves Markdown instead of a PDF, and the `pdf` key of the JSON
 > output is now `archivo`. A script reading `.pdf` (for example `jq -r .pdf`) gets `null`; read `.archivo` instead.

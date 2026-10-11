@@ -155,7 +155,7 @@ mod tests {
     }
 
     #[test]
-    fn parse_results_without_province_serialises_null_province() -> Result<()> {
+    fn parse_results_without_province_omits_the_province_key() -> Result<()> {
         // Arrange
         let html = r#"<div id="normas"><table><tbody><tr>
             <td data-label="Normativa"><a href="/normativa/nacional/ley-1-abc"> Ley 1 </a></td>
@@ -166,7 +166,7 @@ mod tests {
         let json = serde_json::to_string(&results.rows[0])?;
 
         // Assert
-        assert!(json.contains(r#""provincia":null"#));
+        assert!(!json.contains("provincia"));
         assert!(json.contains(r#""jurisdiccion":"nacional""#));
         assert!(json.contains(r#""ley":"ley-1-abc""#));
         Ok(())

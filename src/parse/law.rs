@@ -7,7 +7,9 @@ use scraper::Html;
 
 use super::markdown::{escape_inline, render_blocks};
 use super::{element_text, selector};
-use crate::model::{Jurisdiccion, LawDetails, LawPage, LawTextKind};
+use crate::model::{
+    Jurisdiccion, LawDetails, LawPage, LawTextKind, NationalMetadata, ProvincialMetadata,
+};
 use crate::site::{law_text_path, law_url};
 
 const LAW_TITLE_SELECTOR: &str = "h1.h5";
@@ -21,30 +23,26 @@ struct LawPageLayout {
     text_kinds: &'static [LawTextKind],
     /// The law text on a law text page.
     text_selector: &'static str,
-    /// The province; the page is not a law page without it.
-    province_selector: Option<&'static str>,
-    /// The issuing agency.
-    agency_selector: Option<&'static str>,
-    status_selector: Option<&'static str>,
 }
 
 const PROVINCIAL_LAYOUT: LawPageLayout = LawPageLayout {
     text_kinds: &[LawTextKind::Updated],
     text_selector: "article.m-t-2",
-    province_selector: Some(".label"),
-    agency_selector: None,
-    status_selector: Some("p.m-b-0:nth-child(4) > small:nth-child(1)"),
 };
+
+// The province; the page is not a law page without it.
+const PROVINCE_SELECTOR: &str = ".label.label-default";
+
+const PROVINCIAL_STATUS_SELECTOR: &str = "p.m-b-0:nth-child(4) > small:nth-child(1)";
 
 const NATIONAL_LAYOUT: LawPageLayout = LawPageLayout {
     text_kinds: &[LawTextKind::Updated, LawTextKind::Original],
     // Holds the original and the updated text alike.
     text_selector: "div.infoleg-norma-body",
-    province_selector: None,
-    // Above the subtitle (`p.lead` without `m-b-0`).
-    agency_selector: Some("p.lead.m-b-0"),
-    status_selector: None,
 };
+
+// The issuing agency, above the subtitle (`p.lead` without `m-b-0`).
+const AGENCY_SELECTOR: &str = "p.lead.m-b-0";
 
 fn layout(jurisdiccion: Jurisdiccion) -> &'static LawPageLayout {
     match jurisdiccion {
@@ -79,27 +77,37 @@ fn parse_law_details(
             .next()
             .and_then(element_text))
     };
-    let optional_text_of =
-        |css: Option<&str>| -> Result<Option<String>> { css.map_or(Ok(None), text_of) };
-    let layout = layout(jurisdiccion);
     let Some(titulo) = text_of(LAW_TITLE_SELECTOR)? else {
         bail!("law not found: no title on the page; check `--law`");
     };
-    let provincia = optional_text_of(layout.province_selector)?;
-    if layout.province_selector.is_some() && provincia.is_none() {
-        bail!("law not found: no province on the page; check `--law`");
-    }
-    let organismo = optional_text_of(layout.agency_selector)?;
-    let estado = optional_text_of(layout.status_selector)?;
-    Ok(LawDetails {
-        provincia,
-        jurisdiccion,
-        titulo,
-        organismo,
-        ley: ley.to_owned(),
-        estado,
-        url: law_url(jurisdiccion, ley),
-        archivo: archivo.display().to_string(),
+    let ley = ley.to_owned();
+    let url = law_url(jurisdiccion, &ley);
+    let archivo = archivo.display().to_string();
+    Ok(match jurisdiccion {
+        Jurisdiccion::Provincial => {
+            let Some(provincia) = text_of(PROVINCE_SELECTOR)? else {
+                bail!("law not found: no province on the page; check `--law`");
+            };
+            let estado = text_of(PROVINCIAL_STATUS_SELECTOR)?;
+            if estado.is_none() {
+                tracing::warn!(ley, "law status not found on the page");
+            }
+            LawDetails::Provincial(ProvincialMetadata {
+                provincia,
+                titulo,
+                ley,
+                estado,
+                url,
+                archivo,
+            })
+        }
+        Jurisdiccion::Nacional => LawDetails::Nacional(NationalMetadata {
+            titulo,
+            organismo: text_of(AGENCY_SELECTOR)?,
+            ley,
+            url,
+            archivo,
+        }),
     })
 }
 
@@ -183,17 +191,43 @@ mod tests {
         // Assert
         assert_eq!(
             page.details,
-            LawDetails {
-                provincia: Some("Buenos Aires".to_owned()),
-                jurisdiccion: Jurisdiccion::Provincial,
+            LawDetails::Provincial(ProvincialMetadata {
+                provincia: "Buenos Aires".to_owned(),
                 titulo: "Ley 14709".to_owned(),
-                organismo: None,
                 ley: LAW_SLUG.to_owned(),
                 estado: Some("Vigente, de alcance general".to_owned()),
                 url: format!("{SITE_ORIGIN}/normativa/provincial/{LAW_SLUG}"),
                 archivo: "out/ley.md".to_owned(),
-            }
+            })
         );
+        Ok(())
+    }
+
+    #[test]
+    fn parse_law_page_provincial_page_without_status_returns_no_status() -> Result<()> {
+        // Arrange
+        let html = LAW_FIXTURE.replace(
+            r#"<p class="lead m-b-0"><small>Vigente, de alcance general</small></p>"#,
+            "",
+        );
+        assert_ne!(
+            html, LAW_FIXTURE,
+            "the fixture no longer has the status paragraph"
+        );
+
+        // Act
+        let page = parse_law_page(
+            &html,
+            Jurisdiccion::Provincial,
+            LAW_SLUG,
+            Path::new("out/ley.md"),
+        )?;
+
+        // Assert
+        assert!(matches!(
+            page.details,
+            LawDetails::Provincial(ProvincialMetadata { estado: None, .. })
+        ));
         Ok(())
     }
 
@@ -378,16 +412,13 @@ mod tests {
         // Assert
         assert_eq!(
             page.details,
-            LawDetails {
-                provincia: None,
-                jurisdiccion: Jurisdiccion::Nacional,
+            LawDetails::Nacional(NationalMetadata {
                 titulo: "Decreto 1160/2026".to_owned(),
                 organismo: Some("PODER EJECUTIVO NACIONAL (P.E.N.)".to_owned()),
                 ley: NATIONAL_SLUG.to_owned(),
-                estado: None,
                 url: format!("{SITE_ORIGIN}/normativa/nacional/{NATIONAL_SLUG}"),
                 archivo: "norma-431079.md".to_owned(),
-            }
+            })
         );
         Ok(())
     }

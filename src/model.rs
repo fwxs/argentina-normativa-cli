@@ -3,18 +3,31 @@
 use clap::ValueEnum;
 use serde::Serialize;
 
+/// What `fetch` prints: the jurisdiction and, under `metadata`, the fields that jurisdiction has.
 #[derive(Debug, Serialize, PartialEq)]
-pub(crate) struct LawDetails {
-    // Only provincial laws carry a province.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) provincia: Option<String>,
-    pub(crate) jurisdiccion: Jurisdiccion,
+#[serde(tag = "jurisdiccion", content = "metadata", rename_all = "lowercase")]
+pub(crate) enum LawDetails {
+    Provincial(ProvincialMetadata),
+    Nacional(NationalMetadata),
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub(crate) struct ProvincialMetadata {
+    pub(crate) provincia: String,
     pub(crate) titulo: String,
-    // Issuing agency; only national norms carry it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub(crate) organismo: Option<String>,
     pub(crate) ley: String,
     pub(crate) estado: Option<String>,
+    pub(crate) url: String,
+    // File the law text was saved to.
+    pub(crate) archivo: String,
+}
+
+#[derive(Debug, Serialize, PartialEq)]
+pub(crate) struct NationalMetadata {
+    pub(crate) titulo: String,
+    // Issuing agency.
+    pub(crate) organismo: Option<String>,
+    pub(crate) ley: String,
     pub(crate) url: String,
     // File the law text was saved to.
     pub(crate) archivo: String,
@@ -30,6 +43,8 @@ pub(crate) struct LawPage {
 
 #[derive(Debug, Serialize, PartialEq)]
 pub(crate) struct Normativa {
+    // Only provincial rows carry a province.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub(crate) provincia: Option<String>,
     pub(crate) jurisdiccion: Jurisdiccion,
     pub(crate) tipo_norma: String,
@@ -90,4 +105,57 @@ impl LawTextKind {
 pub(crate) struct ResultsPage {
     pub(crate) total_pages: usize,
     pub(crate) rows: Vec<Normativa>,
+}
+
+#[cfg(test)]
+mod tests {
+    use pretty_assertions::assert_eq;
+
+    use super::*;
+
+    #[test]
+    fn law_details_provincial_serializes_metadata_under_jurisdiction() -> serde_json::Result<()> {
+        // Arrange
+        let details = LawDetails::Provincial(ProvincialMetadata {
+            provincia: "Mendoza".to_owned(),
+            titulo: "Ley 9733".to_owned(),
+            ley: "ley-9733".to_owned(),
+            estado: Some("Vigente, de alcance general".to_owned()),
+            url: "https://www.argentina.gob.ar/normativa/provincial/ley-9733".to_owned(),
+            archivo: "ley-9733.md".to_owned(),
+        });
+
+        // Act
+        let json = serde_json::to_string(&details)?;
+
+        // Assert
+        assert_eq!(
+            json,
+            r#"{"jurisdiccion":"provincial","metadata":{"provincia":"Mendoza","titulo":"Ley 9733","ley":"ley-9733","estado":"Vigente, de alcance general","url":"https://www.argentina.gob.ar/normativa/provincial/ley-9733","archivo":"ley-9733.md"}}"#
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn law_details_nacional_serializes_agency_without_province_or_status() -> serde_json::Result<()>
+    {
+        // Arrange
+        let details = LawDetails::Nacional(NationalMetadata {
+            titulo: "Decreto 1160/2026".to_owned(),
+            organismo: Some("PODER EJECUTIVO NACIONAL (P.E.N.)".to_owned()),
+            ley: "norma-431079".to_owned(),
+            url: "https://www.argentina.gob.ar/normativa/nacional/norma-431079".to_owned(),
+            archivo: "norma-431079.md".to_owned(),
+        });
+
+        // Act
+        let json = serde_json::to_string(&details)?;
+
+        // Assert
+        assert_eq!(
+            json,
+            r#"{"jurisdiccion":"nacional","metadata":{"titulo":"Decreto 1160/2026","organismo":"PODER EJECUTIVO NACIONAL (P.E.N.)","ley":"norma-431079","url":"https://www.argentina.gob.ar/normativa/nacional/norma-431079","archivo":"norma-431079.md"}}"#
+        );
+        Ok(())
+    }
 }

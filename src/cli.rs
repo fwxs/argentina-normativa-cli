@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand, value_parser};
 use crate::model::Jurisdiccion;
 use crate::site::LAW_TYPES;
 
-/// Scraper for provincial laws published on argentina.gob.ar/normativa.
+/// Scraper for provincial laws and national norms published on argentina.gob.ar/normativa.
 #[derive(Debug, Parser)]
 #[command(version, about)]
 pub struct Cli {
@@ -38,7 +38,7 @@ pub enum Command {
         /// or "norma-431079" (nacional).
         #[arg(long)]
         law: String,
-        /// Markdown file for the law text; defaults to `<law>.md` in the current directory.
+        /// Markdown file for the law text; defaults to `<law>.md` in the current directory. Must not exist.
         #[arg(long, value_name = "FILE_PATH")]
         output: Option<PathBuf>,
     },
