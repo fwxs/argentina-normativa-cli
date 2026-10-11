@@ -1,11 +1,12 @@
 # argentina-normativa-cli
 
-Command-line scraper for the provincial laws published on
+Command-line scraper for the provincial laws and national norms published on
 [argentina.gob.ar/normativa](https://www.argentina.gob.ar/normativa). It can:
 
-- list the provinces available in the search form,
-- search the laws (`Ley`) of a province by keyword,
-- save the text of a single law as Markdown.
+- list the provinces, and the agencies, law types and years of the national search form,
+- search the laws (`Ley`) of a province by keyword and filters,
+- search national norms (laws, decrees, resolutions, ...) by type, number, year, agency, dates and keyword,
+- save the text of a single provincial or national law as Markdown.
 
 ## Requirements
 

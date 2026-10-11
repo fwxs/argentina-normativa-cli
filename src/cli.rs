@@ -8,7 +8,7 @@ use clap::{Args, Parser, Subcommand, value_parser};
 use crate::model::Jurisdiccion;
 use crate::site::LAW_TYPES;
 
-/// Scraper for provincial laws published on argentina.gob.ar/normativa.
+/// Scraper for provincial laws and national norms published on argentina.gob.ar/normativa.
 #[derive(Debug, Parser)]
 #[command(version, about)]
 pub struct Cli {
