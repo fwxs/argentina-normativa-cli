@@ -8,7 +8,7 @@ use reqwest::Client;
 
 use crate::http::{FetchError, fetch_html};
 use crate::model::Jurisdiccion;
-use crate::parse::{parse_law_page, parse_law_text, parse_law_text_link};
+use crate::parse::{parse_law_page, parse_law_text};
 use crate::site::{CRAWL_DELAY, SITE_ORIGIN, law_url};
 
 /// Where the law text goes: `--output` when given, otherwise `<ley>.md` in the current directory.
@@ -37,20 +37,23 @@ pub(crate) async fn run_fetch(
     let html = fetch_html(client, &law_url(jurisdiccion, ley))
         .await
         .map_err(describe_not_found("law not found; check `--law`"))?;
-    let details = parse_law_page(&html, jurisdiccion, ley, &text_file)?;
-    let law_text_path = parse_law_text_link(&html, jurisdiccion, ley)?;
+    let page = parse_law_page(&html, jurisdiccion, ley, &text_file)?;
 
     // A second request follows, so honour the crawl delay.
     tokio::time::sleep(CRAWL_DELAY).await;
-    let law_text = fetch_html(client, &format!("{SITE_ORIGIN}{law_text_path}"))
+    let law_text = fetch_html(client, &format!("{SITE_ORIGIN}{}", page.text_path))
         .await
         .map_err(describe_not_found("law text not found; check `--law`"))?;
     tokio::fs::write(&text_file, parse_law_text(&law_text, jurisdiccion)?)
         .await
         .with_context(|| format!("failed to save {}", text_file.display()))?;
 
-    writeln!(std::io::stdout(), "{}", serde_json::to_string(&details)?)
-        .context("failed to write law details to stdout")
+    writeln!(
+        std::io::stdout(),
+        "{}",
+        serde_json::to_string(&page.details)?
+    )
+    .context("failed to write law details to stdout")
 }
 
 #[cfg(test)]

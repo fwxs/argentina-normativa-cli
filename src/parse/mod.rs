@@ -8,7 +8,7 @@ mod results;
 use anyhow::{Result, anyhow};
 use scraper::{ElementRef, Html, Selector};
 
-pub(crate) use law::{parse_law_page, parse_law_text, parse_law_text_link};
+pub(crate) use law::{parse_law_page, parse_law_text};
 pub(crate) use national::{parse_agencies, parse_years};
 pub(crate) use results::parse_results;
 

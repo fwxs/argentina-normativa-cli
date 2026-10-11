@@ -7,7 +7,7 @@ use scraper::Html;
 
 use super::markdown::{escape_inline, render_blocks};
 use super::{element_text, selector};
-use crate::model::{Jurisdiccion, LawDetails};
+use crate::model::{Jurisdiccion, LawDetails, LawPage};
 use crate::site::{law_text_path, law_url};
 
 const PROVINCE_SELECTOR: &str = ".label";
@@ -33,13 +33,26 @@ fn law_text_selector(jurisdiccion: Jurisdiccion) -> &'static str {
     }
 }
 
+/// The details of a law page and the path of its law text page. The page is parsed once for both.
 pub(crate) fn parse_law_page(
     html: &str,
     jurisdiccion: Jurisdiccion,
     ley: &str,
     archivo: &Path,
-) -> Result<LawDetails> {
+) -> Result<LawPage> {
     let document = Html::parse_document(html);
+    Ok(LawPage {
+        details: parse_law_details(&document, jurisdiccion, ley, archivo)?,
+        text_path: parse_law_text_link(&document, jurisdiccion, ley)?,
+    })
+}
+
+fn parse_law_details(
+    document: &Html,
+    jurisdiccion: Jurisdiccion,
+    ley: &str,
+    archivo: &Path,
+) -> Result<LawDetails> {
     let text_of = |css: &str| -> Result<Option<String>> {
         Ok(document
             .select(&selector(css)?)
@@ -75,12 +88,7 @@ pub(crate) fn parse_law_page(
 /// preferred over the original one when the page offers both. A link is only followed when it is
 /// exactly the law text path of the requested law, so the page can't point the next request
 /// anywhere else (and a text page the page doesn't link to, which would be a 404, is never asked for).
-pub(crate) fn parse_law_text_link(
-    html: &str,
-    jurisdiccion: Jurisdiccion,
-    ley: &str,
-) -> Result<String> {
-    let document = Html::parse_document(html);
+fn parse_law_text_link(document: &Html, jurisdiccion: Jurisdiccion, ley: &str) -> Result<String> {
     let hrefs: Vec<&str> = document
         .select(&selector(VIEW_LAW_BUTTON_SELECTOR)?)
         .filter_map(|link| link.value().attr("href"))
@@ -135,10 +143,14 @@ mod tests {
     const LAW_TEXT_BLOCKS_FIXTURE: &str = include_str!("../../tests/fixtures/law_text_blocks.html");
     const LAW_SLUG: &str = "ley-14709-123456789-0abc-defg-907-4100bvorpyel";
 
+    fn text_link(html: &str, jurisdiccion: Jurisdiccion, ley: &str) -> Result<String> {
+        parse_law_text_link(&Html::parse_document(html), jurisdiccion, ley)
+    }
+
     #[test]
     fn parse_law_page_buenos_aires_fixture_returns_province_title_status() -> Result<()> {
         // Act
-        let details = parse_law_page(
+        let page = parse_law_page(
             LAW_FIXTURE,
             Jurisdiccion::Provincial,
             LAW_SLUG,
@@ -147,7 +159,7 @@ mod tests {
 
         // Assert
         assert_eq!(
-            details,
+            page.details,
             LawDetails {
                 provincia: Some("Buenos Aires".to_owned()),
                 jurisdiccion: Jurisdiccion::Provincial,
@@ -256,7 +268,7 @@ mod tests {
     #[test]
     fn parse_law_text_link_law_fixture_returns_actualizacion_href() -> Result<()> {
         // Act
-        let href = parse_law_text_link(LAW_FIXTURE, Jurisdiccion::Provincial, LAW_SLUG)?;
+        let href = text_link(LAW_FIXTURE, Jurisdiccion::Provincial, LAW_SLUG)?;
 
         // Assert
         assert_eq!(
@@ -282,7 +294,7 @@ mod tests {
             "/normativa/provincial/ley-1/texto",
         ] {
             let html = format!(r#"<a class="btn btn-primary" href="{href}">Ver norma</a>"#);
-            let result = parse_law_text_link(&html, Jurisdiccion::Provincial, "ley-1");
+            let result = text_link(&html, Jurisdiccion::Provincial, "ley-1");
             assert!(result.is_err(), "accepted `{href}`");
         }
     }
@@ -290,7 +302,7 @@ mod tests {
     #[test]
     fn parse_law_text_link_page_without_button_returns_error() {
         // Act
-        let result = parse_law_text_link(
+        let result = text_link(
             "<html><body></body></html>",
             Jurisdiccion::Provincial,
             "ley-1",
@@ -312,7 +324,7 @@ mod tests {
     #[test]
     fn parse_law_page_national_fixture_returns_title_and_agency_without_province() -> Result<()> {
         // Act
-        let details = parse_law_page(
+        let page = parse_law_page(
             NATIONAL_LAW_FIXTURE,
             Jurisdiccion::Nacional,
             NATIONAL_SLUG,
@@ -321,7 +333,7 @@ mod tests {
 
         // Assert
         assert_eq!(
-            details,
+            page.details,
             LawDetails {
                 provincia: None,
                 jurisdiccion: Jurisdiccion::Nacional,
@@ -356,8 +368,7 @@ mod tests {
     #[test]
     fn parse_law_text_link_national_original_only_returns_texto_href() -> Result<()> {
         // Act
-        let href =
-            parse_law_text_link(NATIONAL_LAW_FIXTURE, Jurisdiccion::Nacional, NATIONAL_SLUG)?;
+        let href = text_link(NATIONAL_LAW_FIXTURE, Jurisdiccion::Nacional, NATIONAL_SLUG)?;
 
         // Assert
         assert_eq!(href, "/normativa/nacional/norma-431079/texto");
@@ -367,7 +378,7 @@ mod tests {
     #[test]
     fn parse_law_text_link_national_with_updated_text_prefers_actualizacion() -> Result<()> {
         // Act
-        let href = parse_law_text_link(
+        let href = text_link(
             NATIONAL_LAW_UPDATED_FIXTURE,
             Jurisdiccion::Nacional,
             "norma-638",
@@ -390,7 +401,7 @@ mod tests {
         ] {
             let html =
                 format!(r#"<a class="btn btn-primary" href="{href}">Ver norma original</a>"#);
-            let result = parse_law_text_link(&html, Jurisdiccion::Nacional, "norma-1");
+            let result = text_link(&html, Jurisdiccion::Nacional, "norma-1");
             assert!(result.is_err(), "accepted `{href}`");
         }
     }

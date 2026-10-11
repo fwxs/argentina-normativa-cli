@@ -20,6 +20,14 @@ pub(crate) struct LawDetails {
     pub(crate) archivo: String,
 }
 
+/// What a law page gives: the details to print and where its law text page is.
+#[derive(Debug, PartialEq)]
+pub(crate) struct LawPage {
+    pub(crate) details: LawDetails,
+    // Site path of the law text page to fetch next.
+    pub(crate) text_path: String,
+}
+
 #[derive(Debug, Serialize, PartialEq)]
 pub(crate) struct Normativa {
     pub(crate) provincia: Option<String>,
