@@ -4,17 +4,12 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result};
-use chromiumoxide::page::Page;
+use reqwest::{Client, StatusCode};
 
-use crate::browser::{fetch_html, wait_for_url_suffix};
+use crate::http::fetch_html;
 use crate::model::Jurisdiccion;
-use crate::parse::{parse_law_page, parse_law_text};
-use crate::site::{CRAWL_DELAY, law_url};
-
-const VIEW_LAW_BUTTON_SELECTOR: &str = "a.btn.btn-primary";
-
-// The "Ver norma" button leads to `<law url>/actualizacion`, the page holding the law text.
-const VIEW_LAW_PATH_SUFFIX: &str = "/actualizacion";
+use crate::parse::{parse_law_page, parse_law_text, parse_law_text_link};
+use crate::site::{CRAWL_DELAY, SITE_ORIGIN, law_url};
 
 /// Where the law text goes: `--output` when given, otherwise `<ley>.md` in the current directory.
 fn text_path(ley: &str, output: Option<&Path>) -> PathBuf {
@@ -22,34 +17,30 @@ fn text_path(ley: &str, output: Option<&Path>) -> PathBuf {
 }
 
 pub(crate) async fn run_fetch(
-    page: &Page,
+    client: &Client,
     jurisdiccion: Jurisdiccion,
     ley: &str,
     output: Option<&Path>,
 ) -> Result<()> {
     let text_file = text_path(ley, output);
-    let html = fetch_html(page, &law_url(jurisdiccion, ley)).await?;
+    let html = fetch_html(client, &law_url(jurisdiccion, ley))
+        .await
+        .map_err(|error| {
+            let status = error
+                .downcast_ref::<reqwest::Error>()
+                .and_then(reqwest::Error::status);
+            if status == Some(StatusCode::NOT_FOUND) {
+                error.context("law not found; check `--law`")
+            } else {
+                error
+            }
+        })?;
     let details = parse_law_page(&html, jurisdiccion, ley, &text_file)?;
+    let law_text_path = parse_law_text_link(&html)?;
 
     // A second request follows, so honour the crawl delay.
     tokio::time::sleep(CRAWL_DELAY).await;
-    page.find_element(VIEW_LAW_BUTTON_SELECTOR)
-        .await
-        .context("failed to find the \"Ver norma\" button")?
-        .click()
-        .await
-        .context("failed to click the \"Ver norma\" button")?;
-    wait_for_url_suffix(page, VIEW_LAW_PATH_SUFFIX)
-        .await
-        .context("clicking \"Ver norma\" did not open the law text page")?;
-    page.wait_for_navigation()
-        .await
-        .context("failed to load the law text page")?;
-
-    let law_text = page
-        .content()
-        .await
-        .context("failed to read the law text page")?;
+    let law_text = fetch_html(client, &format!("{SITE_ORIGIN}{law_text_path}")).await?;
     std::fs::write(&text_file, parse_law_text(&law_text)?)
         .with_context(|| format!("failed to save {}", text_file.display()))?;
 

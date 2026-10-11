@@ -1,4 +1,4 @@
-//! One runner per subcommand; each drives an already launched browser page.
+//! One runner per subcommand; each requests pages through a shared HTTP client.
 
 mod fetch;
 mod list;

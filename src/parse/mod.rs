@@ -1,4 +1,4 @@
-//! Pure HTML parsers: they turn saved or live page HTML into data and never touch the browser.
+//! Pure HTML parsers: they turn saved or live page HTML into data and never touch the network.
 
 mod law;
 mod national;
@@ -7,7 +7,7 @@ mod results;
 use anyhow::{Result, anyhow};
 use scraper::{Html, Selector};
 
-pub(crate) use law::{parse_law_page, parse_law_text};
+pub(crate) use law::{parse_law_page, parse_law_text, parse_law_text_link};
 pub(crate) use national::{parse_agencies, parse_years};
 pub(crate) use results::parse_results;
 

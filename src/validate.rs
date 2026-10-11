@@ -1,4 +1,4 @@
-//! Input checks that run before Chrome is launched.
+//! Input checks that run before any request is sent.
 
 use anyhow::{Result, bail};
 
