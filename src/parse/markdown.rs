@@ -63,11 +63,15 @@ fn is_hidden(element: ElementRef) -> bool {
     ) || element.value().classes().any(|class| class == "sr-only")
 }
 
-/// Escapes the characters Markdown would read as inline markup.
+/// Escapes the characters Markdown would read as inline markup and drops the line-break stand-in.
 pub(super) fn escape_inline(text: &str) -> String {
     text.chars().fold(
         String::with_capacity(text.len()),
         |mut escaped, character| {
+            // Page text must never carry the `<br>` stand-in, or it would be read as a line break.
+            if character == LINE_BREAK {
+                return escaped;
+            }
             if matches!(character, '\\' | '*' | '_' | '`' | '[' | ']' | '<') {
                 escaped.push('\\');
             }
@@ -440,6 +444,16 @@ mod tests {
 
         // Assert
         assert_eq!(blocks, vec!["Uno", "Dos", "suelto"]);
+        Ok(())
+    }
+
+    #[test]
+    fn render_blocks_page_text_with_the_break_sentinel_is_not_split() -> Result<()> {
+        // Act
+        let blocks = render("<p>a\u{E000}\u{E000}b</p><div>c\u{E000} \u{E000}d</div>")?;
+
+        // Assert
+        assert_eq!(blocks, vec!["ab", "c d"]);
         Ok(())
     }
 
