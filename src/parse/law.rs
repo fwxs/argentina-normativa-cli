@@ -5,7 +5,7 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use scraper::{ElementRef, Html, Node};
 
-use super::{collapse_whitespace, selector};
+use super::{collapse_whitespace, element_text, selector};
 use crate::model::{Jurisdiccion, LawDetails};
 use crate::site::{law_text_path, law_url};
 
@@ -30,8 +30,7 @@ pub(crate) fn parse_law_page(
         Ok(document
             .select(&selector(css)?)
             .next()
-            .map(|element| collapse_whitespace(&element.text().collect::<String>()))
-            .filter(|text| !text.is_empty()))
+            .and_then(element_text))
     };
     let (Some(provincia), Some(titulo)) =
         (text_of(PROVINCE_SELECTOR)?, text_of(LAW_TITLE_SELECTOR)?)
@@ -114,8 +113,7 @@ pub(crate) fn parse_law_text(html: &str) -> Result<String> {
     let title = document
         .select(&selector(LAW_TITLE_SELECTOR)?)
         .next()
-        .map(|element| collapse_whitespace(&element.text().collect::<String>()))
-        .filter(|text| !text.is_empty());
+        .and_then(element_text);
     // The article opens with a screen-reader-only "Norma" heading that is not part of the text.
     let paragraphs = article
         .child_elements()
