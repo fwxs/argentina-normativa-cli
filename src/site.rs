@@ -8,6 +8,7 @@ use url::Url;
 use crate::model::Jurisdiccion;
 use crate::{NationalFilters, ProvinceArgs};
 
+pub(crate) const SITE_HOST: &str = "www.argentina.gob.ar";
 pub(crate) const SITE_ORIGIN: &str = "https://www.argentina.gob.ar";
 pub(crate) const SEARCH_PATH: &str = "/normativa";
 pub(crate) const PAGE_SIZE: &str = "50";

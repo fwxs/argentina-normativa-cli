@@ -76,7 +76,8 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - `robots.txt` sets `Crawl-delay: 10`; the code sleeps `CRAWL_DELAY` between result pages and between the two
   requests of `fetch`. Don't remove it or parallelise requests.
 - `fetch` reads the `href` of `a.btn.btn-primary` ("Ver norma"), `<law path>/actualizacion`; `parse_law_text_link`
-  only accepts a law path plus that suffix, so the page can't redirect the second GET. The law text is
+  only accepts a law path plus that suffix, and the client only follows `https` redirects to the site's own host
+  (`is_allowed_redirect`), so neither the page nor a `Location` header can send the second GET elsewhere. The law text is
   `article.m-t-2` there, rendered to Markdown by `parse_law_text`. A missing slug is a real HTTP 404, which `run_fetch`
   reports as "law not found".
 
