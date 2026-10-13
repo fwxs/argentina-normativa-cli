@@ -11,7 +11,7 @@ use crate::site::is_law_slug;
 /// `--law` ends up in a url path and a file name, so only slug characters are allowed.
 pub(crate) fn validate_law_slug(ley: &str) -> Result<()> {
     if !is_law_slug(ley) {
-        bail!("invalid law `{ley}`: expected a slug of letters, digits and dashes");
+        bail!("invalid law `{ley}`: expected a slug of letters, digits, dashes and underscores");
     }
     Ok(())
 }
@@ -348,6 +348,12 @@ mod tests {
     fn validate_law_slug_real_slug_is_accepted() {
         // Act / Assert
         assert!(validate_law_slug(LAW_SLUG).is_ok());
+    }
+
+    #[test]
+    fn validate_law_slug_underscore_slug_is_accepted() {
+        // Act / Assert
+        assert!(validate_law_slug("decreto_ley-191-123456789-0abc-defg-191-0000wvorpyel").is_ok());
     }
 
     #[test]
