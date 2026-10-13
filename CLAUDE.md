@@ -52,7 +52,7 @@ When a selector breaks, refresh the fixture from the live page and fix the parse
 - Law URL shape: `/normativa/<provincial|nacional>/<ley-slug>`; `parse_law_href` / `law_url` convert both ways.
   Both jurisdictions are verified live for `fetch`; a national slug is `norma-<id>` (`validate_national_slug`).
 - `--law` becomes both a URL path and the default Markdown file name, so `validate_law_slug` allowlists
-  `[A-Za-z0-9-]+`. Keep new user input going into URLs/paths behind a similar check.
+  `[A-Za-z0-9_-]+`. Keep new user input going into URLs/paths behind a similar check.
 
 ## Site behaviour that is easy to get wrong
 

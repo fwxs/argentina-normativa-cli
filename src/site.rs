@@ -48,9 +48,12 @@ pub(crate) const LAW_TYPES: &[&str] = &[
 // robots.txt asks for `Crawl-delay: 10`.
 pub(crate) const CRAWL_DELAY: Duration = Duration::from_secs(10);
 
-/// Law slugs are letters, digits and dashes, so they are safe in a url path and a file name.
+/// Law slugs are letters, digits, dashes and underscores (`decreto_ley-...`), so they are safe in a url path and a file name.
 pub(crate) fn is_law_slug(ley: &str) -> bool {
-    !ley.is_empty() && ley.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+    !ley.is_empty()
+        && ley
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
 /// Splits a law link `/normativa/<jurisdiccion>/<ley>` into its jurisdiction and law slug.
@@ -166,6 +169,18 @@ mod tests {
                 Jurisdiccion::Provincial,
                 "ley-11035-123456789-0abc-defg-373-0000svorpyel"
             ))
+        );
+    }
+
+    #[test]
+    fn parse_law_href_underscore_slug_returns_slug() {
+        // Act
+        let parsed = parse_law_href("/normativa/provincial/decreto_ley-191-abc");
+
+        // Assert
+        assert_eq!(
+            parsed,
+            Some((Jurisdiccion::Provincial, "decreto_ley-191-abc"))
         );
     }
 
